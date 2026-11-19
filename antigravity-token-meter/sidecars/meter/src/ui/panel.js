@@ -195,24 +195,27 @@
       if (d && d.date) dayMap[d.date] = safeInt(d.total);
     });
     const now = new Date();
-    const cols = [];
+    const totalCols = 22;
+    const cell = 11, gap = 3, step = cell + gap;
+    const w = totalCols * step - gap;
+    const h = 7 * step - gap;
+    const cells = [];
     let visibleMax = 1;
-    for (let w = 15; w >= 0; w--) {
-      const col = [];
-      for (let r = 6; r >= 0; r--) {
+    for (let c = 0; c < totalCols; c++) {
+      for (let r = 0; r < 7; r++) {
         const dt = new Date(now);
-        dt.setDate(dt.getDate() - (w * 7 + r));
+        dt.setDate(dt.getDate() - ((totalCols - 1 - c) * 7 + (6 - r)));
         const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
         const val = dayMap[key] || 0;
         if (val > visibleMax) visibleMax = val;
-        col.push({ key, val });
+        cells.push({ x: c * step, y: r * step, key, val });
       }
-      cols.push(col);
     }
-    return cols.map((col) => `<div class="heat-col">${col.map((cell) => {
-      const lvl = cell.val <= 0 ? '' : cell.val > visibleMax * 0.7 ? 'l4' : cell.val > visibleMax * 0.4 ? 'l3' : cell.val > visibleMax * 0.15 ? 'l2' : 'l1';
-      return `<div class="h-cell ${lvl}" title="${esc(`${cell.key}: ${fmtTokens(cell.val)} tokens`)}"></div>`;
-    }).join('')}</div>`).join('');
+    const rects = cells.map((it) => {
+      const cls = it.val <= 0 ? 'h-c0' : it.val > visibleMax * 0.72 ? 'h-c4' : it.val > visibleMax * 0.40 ? 'h-c3' : it.val > visibleMax * 0.14 ? 'h-c2' : 'h-c1';
+      return `<rect x="${it.x}" y="${it.y}" width="${cell}" height="${cell}" rx="2.4" class="${cls}"><title>${esc(`${it.key}: ${fmtTokens(it.val)} tokens`)}</title></rect>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" preserveAspectRatio="xMidYMid meet">${rects}</svg>`;
   }
 
   function renderSubBar(tag, frac, resetIso, pacing) {

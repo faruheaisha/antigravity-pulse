@@ -221,7 +221,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.1',
+    version: '1.2.2',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -274,8 +274,19 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
       monthOutput: 55000000,
       monthRequests: 20498,
       activeDays: 47,
+      totalRequests: 28050,
+      peakDay: { date: '2026-11-14', total: 612000000 },
+      currentStreak: 12,
+      longestStreak: 18,
       totalTokens: 3370000000,
-      days: [{ date: '2026-11-19', total: 288800000 }],
+      days: [
+        { date: '2026-11-14', total: 612000000, byModel: { 'Gemini 4 Argon (High)': 400000000, 'Gemini 4 Neon (XHigh)': 212000000 } },
+        { date: '2026-11-19', total: 288800000, byModel: { 'Gemini 4 Neon (XHigh)': 188800000, 'Gemini 4 Argon (High)': 100000000 } },
+      ],
+      modelRank: [
+        { model: 'Gemini 4 Argon (High)', totalTokens: 1100000000, outputTokens: 15000000, avgTps: 150.2, requests: 9063 },
+        { model: 'Gemini 4 Neon (XHigh)', totalTokens: 540000000, outputTokens: 8000000, avgTps: 146.0, requests: 826 },
+      ],
     },
   };
 
@@ -331,6 +342,9 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
   assert.ok(pop.innerHTML.includes('Gemini Models'));
   quotaChip.dispatchEvent({ type: 'click' });
   assert.equal(pop.classList.contains('open'), false);
+
+  // 确认代码包含 ZCode 风格使用统计弹窗（5 栏 KPI、52 周热力图、每日平滑趋势图与 Donut 圆环图）
+  assert.ok(code.includes('tm-z-kpis') && code.includes('tm-z-donut-svg') && code.includes('buildMonotoneSplinePath'));
 
   win.__agTokenMeterDispose();
 });

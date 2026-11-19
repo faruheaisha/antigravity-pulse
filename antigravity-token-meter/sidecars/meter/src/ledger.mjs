@@ -564,17 +564,28 @@ export class UsageLedger {
     let monthCacheRead = 0;
     let monthOutput = 0;
     let monthRequests = 0;
+    let totalRequests = 0;
+    let peakDay = null;
     const daysList = [];
 
-    for (const key of Object.keys(this.state.days).sort()) {
+    const sortedKeys = Object.keys(this.state.days).sort();
+    const recentCutoffIndex = Math.max(0, sortedKeys.length - 35);
+
+    for (let idx = 0; idx < sortedKeys.length; idx++) {
+      const key = sortedKeys[idx];
       const entry = this.state.days[key];
       const t = safeInt(entry?.total);
+      const reqs = safeInt(entry?.requests);
+      totalRequests += reqs;
+      if (t > 0 && (!peakDay || t > peakDay.total)) {
+        peakDay = { date: key, total: t };
+      }
       if (key === todayKey) {
         todayTokens = t;
         todayInput = safeInt(entry?.input);
         todayCacheRead = safeInt(entry?.cacheRead);
         todayOutput = safeInt(entry?.output);
-        todayRequests = safeInt(entry?.requests);
+        todayRequests = reqs;
         if (entry?.byModel && typeof entry.byModel === 'object') {
           todayByModel = Object.entries(entry.byModel)
             .map(([model, totalTokens]) => ({ model: String(model), totalTokens: safeInt(totalTokens) }))
@@ -589,16 +600,53 @@ export class UsageLedger {
         monthInput += safeInt(entry?.input);
         monthCacheRead += safeInt(entry?.cacheRead);
         monthOutput += safeInt(entry?.output);
-        monthRequests += safeInt(entry?.requests);
+        monthRequests += reqs;
       }
-      daysList.push({
+      const dayItem = {
         date: key,
         total: t,
         input: safeInt(entry?.input),
         cacheRead: safeInt(entry?.cacheRead),
         output: safeInt(entry?.output),
-        requests: safeInt(entry?.requests),
-      });
+        requests: reqs,
+      };
+      // 近 35 天附带分模型消耗，支撑趋势图按模型筛选
+      if (idx >= recentCutoffIndex && entry?.byModel && typeof entry.byModel === 'object') {
+        const bm = {};
+        for (const [mKey, mVal] of Object.entries(entry.byModel)) {
+          const v = safeInt(mVal);
+          if (v > 0) bm[String(mKey)] = v;
+        }
+        dayItem.byModel = bm;
+      }
+      daysList.push(dayItem);
+    }
+
+    // 计算当前连续活跃天数与历史最长连续活跃天数
+    const activeDateSet = new Set(daysList.filter((d) => d.total > 0).map((d) => d.date));
+    let currentStreak = 0;
+    const cursor = new Date(now);
+    if (!activeDateSet.has(toLocalDateKey(cursor))) {
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    while (activeDateSet.has(toLocalDateKey(cursor))) {
+      currentStreak++;
+      cursor.setDate(cursor.getDate() - 1);
+    }
+
+    let longestStreak = 0;
+    let runStreak = 0;
+    let prevDayMs = null;
+    for (const key of [...activeDateSet].sort()) {
+      const [y, m, d] = key.split('-').map(Number);
+      const utcMs = Date.UTC(y, m - 1, d);
+      if (prevDayMs !== null && utcMs - prevDayMs === 86400000) {
+        runStreak++;
+      } else {
+        runStreak = 1;
+      }
+      if (runStreak > longestStreak) longestStreak = runStreak;
+      prevDayMs = utcMs;
     }
 
     const modelRank = Object.entries(this.state.models)
@@ -629,7 +677,11 @@ export class UsageLedger {
       monthCacheRead,
       monthOutput,
       monthRequests,
-      activeDays: daysList.filter((d) => d.total > 0).length,
+      totalRequests,
+      peakDay,
+      currentStreak,
+      longestStreak,
+      activeDays: activeDateSet.size,
       totalTokens: safeInt(this.state.lifetimeTotal),
       importedUntil: this.state.importedUntil,
       days: daysList.slice(-365),

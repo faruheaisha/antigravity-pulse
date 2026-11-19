@@ -89,6 +89,11 @@ test('UsageLedger 支持聚合历史导入、重叠替换、幂等防重与 pend
   assert.equal(snap.monthTokens, 100550);
   assert.equal(snap.monthRequests, 31);
   assert.equal(snap.activeDays, 3);
+  assert.equal(snap.peakDay.date, '2026-11-19');
+  assert.equal(snap.peakDay.total, 100000);
+  assert.equal(snap.currentStreak, 2);
+  assert.equal(snap.longestStreak, 2);
+  assert.equal(snap.days[snap.days.length - 2].byModel['Gemini 4 Argon'], 100000);
   assert.equal(snap.importedUntil, '2026-11-19T14:33:04.257Z');
   assert.equal(await live.getImportedUntilMs(), Date.parse('2026-11-19T14:33:04.257Z'));
 
