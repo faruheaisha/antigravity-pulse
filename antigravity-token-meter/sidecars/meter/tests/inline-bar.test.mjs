@@ -188,10 +188,12 @@ function createDomEnv(snapshot) {
   box.setAttribute('data-testid', 'agent-input-box');
   const footer = new FakeElement('div', doc);
   footer.setAttribute('class', 'agy-composer-footer');
-  footer.getBoundingClientRect = () => ({ left: 100, top: 676, right: 1020, bottom: 708, width: 920, height: 32 });
+  footer.getBoundingClientRect = () => ({ left: 100, top: 676, right: 1060, bottom: 708, width: 960, height: 32 });
   const left = new FakeElement('div', doc);
+  left.getBoundingClientRect = () => ({ left: 100, top: 676, right: 270, bottom: 708, width: 170, height: 32 });
   const right = new FakeElement('div', doc);
   right.setAttribute('data-testid', 'permissions-selector-trigger');
+  right.getBoundingClientRect = () => ({ left: 890, top: 676, right: 1060, bottom: 708, width: 170, height: 32 });
   footer.appendChild(left);
   footer.appendChild(right);
   box.appendChild(footer);
@@ -216,12 +218,12 @@ function createDomEnv(snapshot) {
   win.window = win;
   win.top = win;
 
-  return { doc, win, box };
+  return { doc, win, box, footer, left, right };
 }
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.3',
+    version: '1.2.4',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -290,18 +292,20 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
     },
   };
 
-  const { doc, win } = createDomEnv(snapshot);
+  const { doc, win, footer } = createDomEnv(snapshot);
   t.after(() => {
     try { win.__agTokenMeterDispose?.(); } catch {}
   });
+  let resizeCb = null;
   const code = buildInlineWidgetScript();
-  const fn = new Function('window', 'document', 'location', 'getComputedStyle', 'MutationObserver', code);
+  const fn = new Function('window', 'document', 'location', 'getComputedStyle', 'MutationObserver', 'ResizeObserver', code);
   fn(
     win,
     doc,
     win.location,
     () => ({ display: 'flex', visibility: 'visible', opacity: '1', flexDirection: 'row', backgroundColor: '#ffffff' }),
-    class { observe() {} disconnect() {} }
+    class { observe() {} disconnect() {} },
+    class { constructor(cb) { resizeCb = cb; } observe() {} disconnect() {} }
   );
 
   // 等待首次异步快照加载完成
@@ -352,6 +356,29 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
     code.includes('tm-zcum-xhair') &&
     code.includes('tm-ztrend-xhair')
   );
+
+  // 验证缩窄聊天框宽度时绝不掉到下方，依次平滑切入 compact 与 tight(+N) 收纳档位
+  assert.equal(host.getAttribute('data-placement'), 'inline-footer');
+  assert.equal(host.getAttribute('data-density'), 'full');
+
+  // 缩窄到中等聊天框（730px，可用空间 ~372px -> 命中 compact 档，6 项全保留不掉行）
+  footer.getBoundingClientRect = () => ({ left: 100, top: 676, right: 830, bottom: 708, width: 730, height: 32 });
+  resizeCb?.();
+  await new Promise((r) => setTimeout(r, 65));
+  assert.equal(host.getAttribute('data-placement'), 'inline-footer');
+  assert.equal(host.getAttribute('data-density'), 'compact');
+  assert.equal(shadow.querySelectorAll('[data-tm-chip]').length, 6);
+
+  // 继续缩窄到窄分屏（560px，可用空间 ~202px -> 命中 tight 档，核心项 + "+N" 溢出胶囊）
+  footer.getBoundingClientRect = () => ({ left: 100, top: 676, right: 660, bottom: 708, width: 560, height: 32 });
+  resizeCb?.();
+  await new Promise((r) => setTimeout(r, 65));
+  assert.equal(host.getAttribute('data-placement'), 'inline-footer');
+  assert.equal(host.getAttribute('data-density'), 'tight');
+  const moreChip = shadow.querySelector('[data-tm-chip="more"]');
+  assert.ok(moreChip, 'narrow split should display +N overflow chip');
+  moreChip.dispatchEvent({ type: 'mouseover' });
+  assert.ok(pop.innerHTML.includes('更多指标'));
 
   win.__agTokenMeterDispose();
 });

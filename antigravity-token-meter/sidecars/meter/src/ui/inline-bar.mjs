@@ -40,6 +40,9 @@ export function buildInlineWidgetScript() {
       dark: false,
       lastCid: null,
       barLayoutKey: '',
+      freeWidth: 999,
+      density: 'full',
+      overflowTabs: [],
       copiedUntil: 0,
       requestSeq: 0,
       hoverTimer: null,
@@ -50,6 +53,9 @@ export function buildInlineWidgetScript() {
     var modalHost = null;
     var modalShadow = null;
     var observer = null;
+    var resizeObserver = null;
+    var observedFooter = null;
+    var resizeDebounce = null;
     var pollTimer = null;
     var mountDebounce = null;
 
@@ -265,8 +271,43 @@ export function buildInlineWidgetScript() {
     }
 
     /**
-     * 优先定位输入框底栏（.agy-composer-footer）中右侧操作组之前，实现与「极速 ▾」同行齐平内嵌；
-     * 窗口过窄（< 620px）或未找到底栏结构时自动回退至输入框下方，防止挤压按钮。
+     * 精确测量输入框底栏（.agy-composer-footer）中左侧模型区与右侧操作组之间的真实可用空白宽度。
+     */
+    function measureFooterFreeWidth(footer, rightGroup) {
+      var fRect = footer.getBoundingClientRect();
+      var fw = fRect.width || 0;
+      if (fw <= 0) return 999;
+
+      var rRect = rightGroup.getBoundingClientRect();
+      var rightUsed = rRect.width > 0 && rRect.width < fw ? rRect.width : 170;
+
+      var leftUsed = 0;
+      var kids = Array.from(footer.children || []);
+      for (var i = 0; i < kids.length; i++) {
+        var ch = kids[i];
+        if (ch === hostEl || ch === rightGroup || !isVisible(ch)) continue;
+        // 左侧容器常为 flex-1，需向内量实际可见按钮的右边界，而非被撑满的容器宽度
+        var innerBtns = ch.querySelectorAll ? Array.from(ch.querySelectorAll('button, [role="button"], [data-testid="model-selector-trigger"]')).filter(isVisible) : [];
+        if (innerBtns.length > 0) {
+          for (var j = 0; j < innerBtns.length; j++) {
+            var br = innerBtns[j].getBoundingClientRect();
+            var relRight = br.right - fRect.left;
+            if (relRight > leftUsed && relRight < fw - rightUsed) leftUsed = relRight;
+          }
+        } else {
+          var cr = ch.getBoundingClientRect();
+          if (cr.width > 0 && cr.width < fw * 0.55) {
+            leftUsed = Math.max(leftUsed, cr.right - fRect.left);
+          }
+        }
+      }
+      if (leftUsed <= 0) leftUsed = Math.min(200, Math.round(fw * 0.28));
+      return Math.max(0, Math.round(fw - leftUsed - rightUsed - 18));
+    }
+
+    /**
+     * 始终优先定位在输入框底栏（.agy-composer-footer）右侧操作组之前；
+     * 缩窄时通过四级渐进自适应（full → compact → tight(+N) → mini）保持同排齐平，绝不掉到输入框下方。
      */
     function findMountAnchor() {
       var box = findComposerContainer();
@@ -289,7 +330,6 @@ export function buildInlineWidgetScript() {
       }
 
       if (footer && isVisible(footer)) {
-        var fw = footer.getBoundingClientRect().width;
         var rightGroup = null;
         var anchorTrigger = footer.querySelector('[data-testid="permissions-selector-trigger"], [data-testid="send-button"], [data-testid="stop-button"]');
         if (anchorTrigger) {
@@ -302,20 +342,66 @@ export function buildInlineWidgetScript() {
         if (!rightGroup && footer.children.length >= 2) {
           rightGroup = footer.lastElementChild;
         }
-        var enabledCount =
-          (state.prefs.showSpeed !== false ? 1 : 0) +
-          (state.prefs.showCache !== false ? 1 : 0) +
-          (state.prefs.showContext !== false ? 1 : 0) +
-          (state.prefs.showQuota !== false ? 1 : 0) +
-          (state.prefs.showToday === true ? 1 : 0) +
-          (state.prefs.showMonth === true ? 1 : 0);
-        var minInlineWidth = enabledCount >= 6 ? 760 : enabledCount >= 5 ? 680 : 620;
-        if (rightGroup && fw >= minInlineWidth) {
-          return { parent: footer, before: rightGroup, placement: 'inline-footer' };
+        if (rightGroup) {
+          return {
+            parent: footer,
+            before: rightGroup,
+            placement: 'inline-footer',
+            freeWidth: measureFooterFreeWidth(footer, rightGroup),
+          };
         }
       }
 
-      return { parent: box, before: null, placement: 'below' };
+      return { parent: box, before: null, placement: 'below', freeWidth: 999 };
+    }
+
+    /**
+     * 四级渐进自适应布局计算：按底栏剩余真实宽度决定 full / compact / tight(+N) / mini。
+     */
+    function computeBarLayout(enabledTabs, freeWidth) {
+      if (!enabledTabs.length) return { density: 'full', shown: [], hidden: [] };
+      var fullW = { speed: 88, cache: 86, context: 86, quota: 80, today: 88, month: 78 };
+      var compactW = { speed: 56, cache: 56, context: 48, quota: 58, today: 58, month: 54 };
+      var sepW = 5;
+
+      var totalFull = enabledTabs.reduce(function(acc, k) { return acc + (fullW[k] || 76); }, 0) + Math.max(0, enabledTabs.length - 1) * sepW;
+      if (freeWidth >= totalFull) {
+        return { density: 'full', shown: enabledTabs.slice(), hidden: [] };
+      }
+
+      var totalCompact = enabledTabs.reduce(function(acc, k) { return acc + (compactW[k] || 54); }, 0) + Math.max(0, enabledTabs.length - 1) * sepW;
+      if (freeWidth >= totalCompact) {
+        return { density: 'compact', shown: enabledTabs.slice(), hidden: [] };
+      }
+
+      if (freeWidth < 102) {
+        return { density: 'mini', shown: [], hidden: enabledTabs.slice() };
+      }
+
+      // tight 档：按核心优先级尽量保留能放下的格子，其余收纳进末尾 +N 胶囊
+      var priority = ['speed', 'context', 'quota', 'month', 'cache', 'today'];
+      var budget = freeWidth - 36; // 预留给 "+N" 溢出胶囊
+      var picked = Object.create(null);
+      var used = 0;
+      for (var i = 0; i < priority.length; i++) {
+        var key = priority[i];
+        if (enabledTabs.indexOf(key) < 0) continue;
+        var need = (compactW[key] || 54) + (used > 0 ? sepW : 0);
+        if (used + need <= budget) {
+          picked[key] = true;
+          used += need;
+        }
+      }
+      var shown = [];
+      var hidden = [];
+      for (var j = 0; j < enabledTabs.length; j++) {
+        if (picked[enabledTabs[j]]) shown.push(enabledTabs[j]);
+        else hidden.push(enabledTabs[j]);
+      }
+      if (shown.length === 0) {
+        return { density: 'mini', shown: [], hidden: enabledTabs.slice() };
+      }
+      return { density: 'tight', shown: shown, hidden: hidden };
     }
 
     function buildSparkleIcon(cls, dual) {
@@ -665,6 +751,44 @@ export function buildInlineWidgetScript() {
         };
       }
 
+      // 溢出收纳卡（narrow / mini 档悬停 +N 或 ✦ 时集中展示被收纳的指标）
+      if (tab === 'more') {
+        var hiddenList = (state.overflowTabs && state.overflowTabs.length) ? state.overflowTabs : ['speed', 'cache', 'context', 'quota', 'today', 'month'];
+        var leadQ = (quotas && quotas[0]) || null;
+        var qPartsMore = getQuotaPairParts(snap && snap.quotaPair, leadQ);
+        var qValMore = qPartsMore.single !== undefined ? qPartsMore.single : (qPartsMore.left + '/' + qPartsMore.right);
+        var metricRows = hiddenList.map(function(k) {
+          var lbl = '', val = '--';
+          if (k === 'speed') {
+            lbl = t('cardSpeed');
+            var sp = conv && (conv.latestTps != null ? conv.latestTps : conv.tps);
+            val = sp != null ? Number(sp).toFixed(1) + ' ' + t('speedUnit') : '--';
+          } else if (k === 'cache') {
+            lbl = t('cacheHit');
+            val = fmtPct(conv && conv.cacheHitRate);
+          } else if (k === 'context') {
+            lbl = t('context');
+            val = conv && conv.context ? fmtPct(conv.context.usedFraction) : '--';
+          } else if (k === 'quota') {
+            lbl = t('quota');
+            val = qValMore;
+          } else if (k === 'today') {
+            lbl = t('today');
+            val = usage ? fmtTokens(usage.todayTokens) : '--';
+          } else if (k === 'month') {
+            lbl = t('month');
+            val = usage ? fmtTokens(usage.monthTokens) : '--';
+          }
+          return '<div class="tm-more-row"><span class="tm-more-k">' + escapeHtml(lbl) + '</span><span class="tm-more-v">' + escapeHtml(val) + '</span></div>';
+        }).join('');
+        return {
+          title: t('moreMetrics'),
+          badge: isRunning ? ('· ' + t('generating')) : '',
+          footCtx: modelLabel,
+          body: '<div class="tm-more-list">' + metricRows + '</div>',
+        };
+      }
+
       // 兜底（当用户隐藏全部单项仅剩品牌图标时）
       var ub = usage || {};
       return {
@@ -799,6 +923,26 @@ export function buildInlineWidgetScript() {
         :host([data-placement="inline-footer"]) .tm-chips {
           flex-wrap: nowrap;
         }
+        :host([data-density="compact"]) .tm-chip,
+        :host([data-density="tight"]) .tm-chip {
+          padding: 2px 4px;
+          gap: 3.5px;
+          font-size: 11px;
+        }
+        :host([data-density="compact"]) .tm-label,
+        :host([data-density="tight"]) .tm-label {
+          font-size: 10.5px;
+        }
+        :host([data-density="compact"]) .tm-sep,
+        :host([data-density="tight"]) .tm-sep {
+          margin: 0 1px;
+        }
+        .tm-chip-more { font-family: var(--tm-mono); font-size: 10.5px; color: var(--tm-sub); background: var(--tm-hover); padding: 1px 5px !important; }
+        .tm-more-list { display: flex; flex-direction: column; gap: 2px; }
+        .tm-more-row { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 2px; border-bottom: 1px solid var(--tm-hairline); font-size: 11.5px; }
+        .tm-more-row:last-child { border-bottom: none; padding-bottom: 2px; }
+        .tm-more-k { color: var(--tm-muted); }
+        .tm-more-v { font-family: var(--tm-mono); font-weight: 600; color: var(--tm-text); font-variant-numeric: tabular-nums; }
         .tm-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 1px; }
         .tm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .14s ease, color .14s ease; line-height: 17px; font-size: 11.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
         .tm-chip:hover, .tm-chip:focus-visible, .tm-chip.active { background: var(--tm-hover); color: var(--tm-text); outline: none; }
@@ -1590,41 +1734,54 @@ export function buildInlineWidgetScript() {
       var showQuota = prefs.showQuota !== false && hasQuota;
       var showToday = prefs.showToday === true && Boolean(usage);
       var showMonth = prefs.showMonth === true && Boolean(usage);
-      var visibleTabs = [];
-      if (showSpeed) visibleTabs.push('speed');
-      if (showCache) visibleTabs.push('cache');
-      if (showContext) visibleTabs.push('context');
-      if (showQuota) visibleTabs.push('quota');
-      if (showToday) visibleTabs.push('today');
-      if (showMonth) visibleTabs.push('month');
+      var enabledTabs = [];
+      if (showSpeed) enabledTabs.push('speed');
+      if (showCache) enabledTabs.push('cache');
+      if (showContext) enabledTabs.push('context');
+      if (showQuota) enabledTabs.push('quota');
+      if (showToday) enabledTabs.push('today');
+      if (showMonth) enabledTabs.push('month');
+
+      var layout = computeBarLayout(enabledTabs, state.freeWidth);
+      state.density = layout.density;
+      state.overflowTabs = layout.hidden;
+      hostEl.setAttribute('data-density', layout.density);
+
+      var visibleTabs = layout.shown.slice();
+      if (layout.hidden.length > 0) visibleTabs.push('more');
       if (visibleTabs.length === 0) visibleTabs.push('brand');
       if (visibleTabs.indexOf(state.activeTab) < 0) state.activeTab = visibleTabs[0];
 
+      var isCompact = layout.density !== 'full';
       var langKey = prefs.language === 'en' ? 'en' : 'zh-CN';
-      var layoutKey = [langKey, showSpeed ? 1 : 0, showCache ? 1 : 0, showContext ? 1 : 0, showQuota ? 1 : 0, showToday ? 1 : 0, showMonth ? 1 : 0].join(':');
+      var layoutKey = [langKey, layout.density, layout.shown.join(','), layout.hidden.length].join('|');
 
       var chipsEl = shadow.getElementById('tm-chips');
       if (chipsEl) {
         if (state.barLayoutKey !== layoutKey || !chipsEl.firstChild) {
           var barStar = buildSparkleIcon(starCls, false);
           var chipItems = [];
-          if (showSpeed) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="speed" data-tm-trigger="1">' + barStar + '<span class="tm-val" data-tm-v="speed">--</span><span class="tm-unit">' + escapeHtml(t('speedUnit')) + '</span></button>');
+          for (var ci = 0; ci < layout.shown.length; ci++) {
+            var ck = layout.shown[ci];
+            var leadStar = chipItems.length === 0 ? barStar : '';
+            if (ck === 'speed') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="speed" data-tm-trigger="1">' + leadStar + '<span class="tm-val" data-tm-v="speed">--</span>' + (isCompact ? '' : '<span class="tm-unit">' + escapeHtml(t('speedUnit')) + '</span>') + '</button>');
+            } else if (ck === 'cache') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="cache" data-tm-trigger="1">' + leadStar + '<span class="tm-label">' + escapeHtml(isCompact ? t('cacheShort') : t('cacheHit')) + '</span><span class="tm-val" data-tm-v="cache">--</span></button>');
+            } else if (ck === 'context') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="context" data-tm-trigger="1">' + leadStar + buildContextRingSvg(ctxFrac, 'bar') + (isCompact ? '' : '<span class="tm-label">' + escapeHtml(t('context')) + '</span>') + '<span class="tm-val" data-tm-v="ctx">--</span></button>');
+            } else if (ck === 'quota') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="quota" data-tm-trigger="1" title="' + escapeHtml(t('quotaPairTip')) + '">' + leadStar + (isCompact ? '' : '<span class="tm-label">' + escapeHtml(t('quota')) + '</span>') + '<span class="tm-val" data-tm-v="quota"><span data-tm-q="l">--</span><span class="tm-slash">/</span><span data-tm-q="r">--</span></span></button>');
+            } else if (ck === 'today') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="today" data-tm-trigger="1">' + leadStar + '<span class="tm-label">' + escapeHtml(isCompact ? t('todayShort') : t('today')) + '</span><span class="tm-val" data-tm-v="today">--</span></button>');
+            } else if (ck === 'month') {
+              chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="month" data-tm-trigger="1">' + leadStar + '<span class="tm-label">' + escapeHtml(isCompact ? t('monthShort') : t('month')) + '</span><span class="tm-val" data-tm-v="month">--</span></button>');
+            }
           }
-          if (showCache) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="cache" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('cacheHit')) + '</span><span class="tm-val" data-tm-v="cache">--</span></button>');
-          }
-          if (showContext) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="context" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + buildContextRingSvg(ctxFrac, 'bar') + '<span class="tm-label">' + escapeHtml(t('context')) + '</span><span class="tm-val" data-tm-v="ctx">--</span></button>');
-          }
-          if (showQuota) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="quota" data-tm-trigger="1" title="' + escapeHtml(t('quotaPairTip')) + '">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('quota')) + '</span><span class="tm-val" data-tm-v="quota"><span data-tm-q="l">--</span><span class="tm-slash">/</span><span data-tm-q="r">--</span></span></button>');
-          }
-          if (showToday) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="today" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val" data-tm-v="today">--</span></button>');
-          }
-          if (showMonth) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="month" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('month')) + '</span><span class="tm-val" data-tm-v="month">--</span></button>');
+          if (layout.density === 'mini') {
+            chipItems.push('<button class="tm-chip tm-chip-more" type="button" aria-expanded="false" data-tm-chip="more" data-tm-trigger="1" title="' + escapeHtml(t('moreMetrics')) + '">' + barStar + '<span>+' + layout.hidden.length + '</span></button>');
+          } else if (layout.hidden.length > 0) {
+            chipItems.push('<button class="tm-chip tm-chip-more" type="button" aria-expanded="false" data-tm-chip="more" data-tm-trigger="1" title="' + escapeHtml(t('moreMetrics')) + '">+' + layout.hidden.length + '</button>');
           }
           chipsEl.innerHTML = chipItems.length
             ? chipItems.join('<span class="tm-sep" aria-hidden="true"></span>')
@@ -2174,12 +2331,35 @@ export function buildInlineWidgetScript() {
         });
       }
 
+      var prevFree = state.freeWidth;
+      if (typeof anchor.freeWidth === 'number' && Number.isFinite(anchor.freeWidth)) {
+        state.freeWidth = anchor.freeWidth;
+      }
+
+      // 绑定 ResizeObserver 实时监听底栏容器缩放（包含拖动 IDE 分屏边栏缩小聊天框宽度）
+      if (anchor.placement === 'inline-footer' && typeof ResizeObserver === 'function' && observedFooter !== anchor.parent) {
+        try { resizeObserver && resizeObserver.disconnect(); } catch {}
+        observedFooter = anchor.parent;
+        resizeObserver = new ResizeObserver(function() {
+          if (resizeDebounce || state.disposed) return;
+          resizeDebounce = setTimeout(function() {
+            resizeDebounce = null;
+            ensureMounted();
+            if (state.popoverOpen) positionPopover();
+          }, 45);
+        });
+        try { resizeObserver.observe(observedFooter); } catch {}
+      }
+
       var samePlacement = hostEl.getAttribute('data-placement') === anchor.placement;
       var alreadyPlaced =
         samePlacement &&
         hostEl.parentElement === anchor.parent &&
         (anchor.before ? hostEl.nextElementSibling === anchor.before : hostEl.nextElementSibling === null);
-      if (alreadyPlaced) return;
+      if (alreadyPlaced) {
+        if (Math.abs(state.freeWidth - prevFree) >= 6) renderBar();
+        return;
+      }
 
       hostEl.setAttribute('data-placement', anchor.placement);
       if (anchor.before && anchor.before.parentElement === anchor.parent) {
@@ -2262,8 +2442,11 @@ export function buildInlineWidgetScript() {
       state.requestSeq++;
       clearInterval(pollTimer);
       clearTimeout(mountDebounce);
+      clearTimeout(resizeDebounce);
       clearTimeout(state.hoverTimer);
       try { observer && observer.disconnect(); } catch {}
+      try { resizeObserver && resizeObserver.disconnect(); } catch {}
+      observedFooter = null;
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('pointerup', onPointerUp, true);
