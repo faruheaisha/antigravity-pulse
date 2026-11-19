@@ -461,13 +461,26 @@ export function buildInlineWidgetScript() {
 
     var CTX_RING_R = 5.6;
     var CTX_RING_CIRC = 2 * Math.PI * CTX_RING_R;
+    // 参考 Codex 的五段丰富连续色阶：翠绿 -> 天蓝 -> 琥珀金 -> 70% 明显朱红 -> 85% 鲜红 -> 爆满全红
     var CTX_COLOR_STOPS = [
-      [0.0, 59, 130, 246],
-      [0.48, 37, 99, 235],
-      [0.72, 217, 119, 6],
-      [0.90, 220, 38, 38],
-      [1.0, 185, 28, 28],
+      [0.00, 16, 185, 129],
+      [0.32, 14, 165, 233],
+      [0.52, 245, 158, 11],
+      [0.68, 242, 82, 46],
+      [0.82, 239, 68, 68],
+      [0.95, 220, 38, 38],
+      [1.00, 185, 28, 28],
     ];
+
+    function buildContextBarFillStyle(frac) {
+      var f = Math.max(0, Math.min(1, Number(frac) || 0));
+      var pct = Math.round(f * 100);
+      if (f >= 0.90) {
+        return 'width:' + pct + '%;background:linear-gradient(90deg,#ef4444 0%,#dc2626 55%,#b91c1c 100%);';
+      }
+      var bgScale = (100 / Math.max(0.05, f)).toFixed(1) + '% 100%';
+      return 'width:' + pct + '%;background:linear-gradient(90deg,#10b981 0%,#0ea5e9 34%,#f59e0b 54%,#f2522e 70%,#ef4444 85%,#dc2626 100%);background-size:' + bgScale + ';background-position:left center;';
+    }
 
     function interpCtxColor(frac) {
       var f = Math.max(0, Math.min(1, Number(frac) || 0));
@@ -511,7 +524,7 @@ export function buildInlineWidgetScript() {
       if (!Array.isArray(points) || points.length < 2) {
         return { html: '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>', meta: null };
       }
-      var w = 276, h = 42, padX = 3, padY = 6;
+      var w = 276, h = 48, padX = 6, padY = 8;
       var vals = points.map(function(p) { var v = Number(p && p.tps); return Number.isFinite(v) && v >= 0 ? v : 0; });
       var min = Math.min.apply(null, vals);
       var max = Math.max.apply(null, vals);
@@ -536,6 +549,10 @@ export function buildInlineWidgetScript() {
           y: pts[idx][1],
         };
       });
+      var nodesHtml = items.map(function(it, idx) {
+        if (idx === items.length - 1) return '';
+        return '<circle class="tm-sp-node" cx="' + it.x.toFixed(1) + '" cy="' + it.y.toFixed(1) + '" r="2.2" fill="var(--tm-card)" stroke="currentColor" stroke-width="1.35" pointer-events="none"/>';
+      }).join('');
       return {
         html: '<svg class="tm-spark tm-chart-interactive" id="tm-spark-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
           '<defs><linearGradient id="tm-sp-area" x1="0" y1="0" x2="0" y2="' + h + '" gradientUnits="userSpaceOnUse">' +
@@ -545,10 +562,12 @@ export function buildInlineWidgetScript() {
           '<line x1="0" y1="' + midY + '" x2="' + w + '" y2="' + midY + '" stroke="var(--tm-hairline)" stroke-dasharray="2 3"/>' +
           '<polygon points="' + area + '" fill="url(#tm-sp-area)" pointer-events="none"/>' +
           '<polyline points="' + coords.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>' +
-          '<circle id="tm-sp-last" cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="2.6" fill="var(--tm-accent)" stroke="var(--tm-card)" stroke-width="1.4" pointer-events="none"/>' +
+          nodesHtml +
+          '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="5.2" fill="var(--tm-accent)" fill-opacity="0.16" pointer-events="none"/>' +
+          '<circle id="tm-sp-last" cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="2.9" fill="var(--tm-accent)" stroke="var(--tm-card)" stroke-width="1.5" pointer-events="none"/>' +
           '<line id="tm-sp-xhair" x1="0" y1="2" x2="0" y2="' + (h - 2) + '" class="tm-sp-xhair" style="display:none"/>' +
-          '<circle id="tm-sp-halo" cx="0" cy="0" r="6" fill="var(--tm-accent)" fill-opacity="0.18" pointer-events="none" style="display:none"/>' +
-          '<circle id="tm-sp-dot" cx="0" cy="0" r="3.2" fill="var(--tm-card)" stroke="var(--tm-accent)" stroke-width="2" pointer-events="none" style="display:none"/>' +
+          '<circle id="tm-sp-halo" cx="0" cy="0" r="6.5" fill="var(--tm-accent)" fill-opacity="0.22" pointer-events="none" style="display:none"/>' +
+          '<circle id="tm-sp-dot" cx="0" cy="0" r="3.4" fill="var(--tm-card)" stroke="var(--tm-accent)" stroke-width="2.1" pointer-events="none" style="display:none"/>' +
           '<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="transparent"/>' +
         '</svg>',
         meta: { kind: 'spark', w: w, padX: padX, items: items },
@@ -734,6 +753,8 @@ export function buildInlineWidgetScript() {
         var turnsText = ctx && typeof ctx.estimatedTurnsLeft === 'number' && Number.isFinite(ctx.estimatedTurnsLeft)
           ? (isEnCtx ? (t('turnsLeft') + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')) : (t('turnsLeft') + ' ' + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')))
           : '';
+        var ctxTone = ctxFrac >= 0.80 ? 'danger' : ctxFrac >= 0.60 ? 'high' : '';
+        var ctxNoteText = ctxFrac >= 0.80 ? t('ctxHigh') : ctxFrac >= 0.60 ? t('ctxMid') : t('ctxHealthy');
         return {
           title: t('cardContext'),
           badge: '',
@@ -743,13 +764,13 @@ export function buildInlineWidgetScript() {
               '<div class="tm-hero-main tm-hero-ctx">' + buildContextLargeRingSvg(ctxFrac) + '<span class="tm-hero-num">' + escapeHtml(fmtPct(ctxFrac)) + '</span></div>' +
               '<div class="tm-hero-meta">' + (turnsText ? ('<b>' + escapeHtml(turnsText) + '</b><br/>') : '') + escapeHtml(fmtTokens(ctx.usedTokens) + ' / ' + fmtTokens(ctx.maxTokens)) + '</div>' +
             '</div>' +
-            '<div class="tm-ctx-bar"><div class="tm-ctx-fill" style="width:' + ctxPct + '%;background:' + interpCtxColor(ctxFrac) + '"></div></div>' +
+            '<div class="tm-ctx-bar"><div class="tm-ctx-fill" style="' + buildContextBarFillStyle(ctxFrac) + '"></div></div>' +
             '<div class="tm-sub-strip tm-sub-strip-tight">' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('usedTokens')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.usedTokens)) + '</div></div>' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('remaining')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.remainingTokens)) + '</div></div>' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('windowCap')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.maxTokens)) + '</div></div>' +
             '</div>' +
-            '<div class="tm-ctx-note ' + (ctxFrac >= 0.8 ? 'high' : '') + '">' + escapeHtml(ctxFrac >= 0.8 ? t('ctxHigh') : t('ctxHealthy')) + '</div>'
+            '<div class="tm-ctx-note ' + ctxTone + '">' + escapeHtml(ctxNoteText) + '</div>'
           ) : ('<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>'),
         };
       }
@@ -1108,6 +1129,8 @@ export function buildInlineWidgetScript() {
         .tm-trend.has-hover .tm-trend-bar { opacity: 0.32; }
         .tm-trend.has-hover .tm-trend-bar.active { opacity: 1; fill: var(--tm-accent); fill-opacity: 1; filter: drop-shadow(0 0 4px var(--tm-gem-glow)); }
         .tm-trend.has-hover .tm-trend-bar.is-zero.active { opacity: 1; fill: var(--tm-muted); fill-opacity: 0.65; filter: none; }
+        .tm-sp-node { transition: opacity .12s ease; }
+        .tm-spark.has-hover .tm-sp-node { opacity: 0.45; }
         .tm-sp-xhair { stroke: var(--tm-muted); stroke-width: 1; stroke-dasharray: 2.5 2.5; opacity: 0.7; pointer-events: none; }
         .tm-mini-tip { position: absolute; left: 0; top: 0; z-index: 20; pointer-events: none; background: var(--tm-card); border: 1px solid var(--tm-border); border-radius: 7px; box-shadow: 0 8px 20px -6px rgba(15,23,42,0.22), 0 1px 4px rgba(15,23,42,0.08); padding: 4px 8px; font-size: 10.5px; line-height: 1.35; color: var(--tm-text); white-space: nowrap; opacity: 0; transform: translate(-50%, calc(-100% - 6px)); transition: opacity .08s ease; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
         .tm-mini-tip.show { opacity: 1; }
@@ -1126,10 +1149,11 @@ export function buildInlineWidgetScript() {
         .tm-usage-k { font-size: 9.5px; color: var(--tm-muted); margin-bottom: 2px; }
         .tm-usage-v { font-family: var(--tm-mono); font-size: 11.5px; font-weight: 600; color: var(--tm-text); }
         .tm-usage-sub { margin-top: 7px; font-family: var(--tm-mono); font-size: 10px; color: var(--tm-muted); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
-        .tm-ctx-bar { width: 100%; height: 5px; border-radius: 99px; background: var(--tm-elev); overflow: hidden; margin: 5px 0 9px; }
-        .tm-ctx-fill { height: 100%; border-radius: 99px; transition: width .35s ease, background-color .35s ease; }
-        .tm-ctx-note { font-size: 10px; color: var(--tm-muted); margin-top: 7px; }
-        .tm-ctx-note.high { color: var(--tm-warn); font-weight: 500; }
+        .tm-ctx-bar { width: 100%; height: 6px; border-radius: 99px; background: var(--tm-elev); overflow: hidden; margin: 5px 0 9px; }
+        .tm-ctx-fill { height: 100%; border-radius: 99px; transition: width .35s ease, background .35s ease; }
+        .tm-ctx-note { font-size: 10.5px; color: var(--tm-muted); margin-top: 7px; }
+        .tm-ctx-note.high { color: #f2522e; font-weight: 500; }
+        .tm-ctx-note.danger { color: var(--tm-danger); font-weight: 600; }
         .tm-mbar-list { display: flex; flex-direction: column; gap: 6px; }
         .tm-mbar-row { display: flex; flex-direction: column; gap: 3px; }
         .tm-mbar-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; gap: 8px; }
@@ -2164,6 +2188,7 @@ export function buildInlineWidgetScript() {
           var rect = spSvg.getBoundingClientRect ? spSvg.getBoundingClientRect() : null;
           if (!rect || rect.width <= 0) return;
           state.hoveringPopChart = true;
+          spSvg.classList.add('has-hover');
           var svgX = ((ev.clientX - rect.left) / rect.width) * meta.w;
           var ratio = Math.max(0, Math.min(1, (svgX - meta.padX) / Math.max(1, meta.w - meta.padX * 2)));
           var idx = Math.round(ratio * (meta.items.length - 1));
@@ -2188,6 +2213,7 @@ export function buildInlineWidgetScript() {
         });
         spSvg.addEventListener('mouseleave', function() {
           state.hoveringPopChart = false;
+          spSvg.classList.remove('has-hover');
           if (spXhair) spXhair.style.display = 'none';
           if (spHalo) spHalo.style.display = 'none';
           if (spDot) spDot.style.display = 'none';

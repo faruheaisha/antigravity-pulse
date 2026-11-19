@@ -60,15 +60,17 @@
     return `${mins}m`;
   }
 
-  /* 0%–100% 无级跟进上下文圆环（低饱和高级连续色阶） */
+  /* 0%–100% 无级跟进上下文圆环（五段丰富连续色阶：翠绿 -> 天蓝 -> 琥珀 -> 70% 朱红 -> 爆满全红） */
   const CTX_RING_R = 5.6;
   const CTX_RING_CIRC = 2 * Math.PI * CTX_RING_R;
   const CTX_COLOR_STOPS = [
-    [0.0, 59, 130, 246],
-    [0.48, 37, 99, 235],
-    [0.72, 217, 119, 6],
-    [0.90, 220, 38, 38],
-    [1.0, 185, 28, 28],
+    [0.00, 16, 185, 129],
+    [0.32, 14, 165, 233],
+    [0.52, 245, 158, 11],
+    [0.68, 242, 82, 46],
+    [0.82, 239, 68, 68],
+    [0.95, 220, 38, 38],
+    [1.00, 185, 28, 28],
   ];
 
   function interpCtxColor(frac) {
@@ -109,7 +111,7 @@
 
   function renderSpark(points) {
     if (!Array.isArray(points) || points.length < 2) return '<div style="color:var(--faint);font-size:11.5px;padding:10px 0;text-align:center;">' + esc(t('noData')) + '</div>';
-    const w = 310, h = 48, padX = 3, padY = 6;
+    const w = 310, h = 50, padX = 6, padY = 8;
     const vals = points.map((p) => { const v = Number(p && p.tps); return Number.isFinite(v) && v >= 0 ? v : 0; });
     const min = Math.min(...vals), max = Math.max(...vals), span = Math.max(1, max - min);
     const pts = vals.map((v, i) => [
@@ -120,11 +122,16 @@
     const area = `${padX},${h - 2} ${coords.join(' ')} ${w - padX},${h - 2}`;
     const last = pts[pts.length - 1];
     const midY = (h / 2).toFixed(1);
+    const nodes = pts.slice(0, -1).map((p) =>
+      `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2.2" fill="var(--card)" stroke="currentColor" stroke-width="1.35"/>`
+    ).join('');
     return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="display:block;overflow:visible">` +
       `<defs><linearGradient id="p-sp-area" x1="0" y1="0" x2="0" y2="${h}" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="currentColor" stop-opacity="0.10"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>` +
       `<line x1="0" y1="${midY}" x2="${w}" y2="${midY}" stroke="var(--hairline)" stroke-dasharray="2 3"/>` +
       `<polygon points="${area}" fill="url(#p-sp-area)"/><polyline points="${coords.join(' ')}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` +
-      `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.7" fill="var(--accent)" stroke="var(--card)" stroke-width="1.5"/></svg>`;
+      nodes +
+      `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="5" fill="var(--accent)" fill-opacity="0.16"/>` +
+      `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.9" fill="var(--accent)" stroke="var(--card)" stroke-width="1.5"/></svg>`;
   }
 
   async function apiGet(path) {
