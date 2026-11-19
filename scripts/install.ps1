@@ -5,10 +5,10 @@
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.1 安装器' } catch {}
+try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.2 安装器' } catch {}
 
 Write-Host '================================================================' -ForegroundColor Cyan
-Write-Host '  Antigravity TokenMeter v1.1.1 (MIT License)' -ForegroundColor Cyan
+Write-Host '  Antigravity TokenMeter v1.1.2 (MIT License)' -ForegroundColor Cyan
 Write-Host '  支持侧边栏面板 + 可选实验性底部内嵌状态条（不修改 app.asar）' -ForegroundColor Cyan
 Write-Host '================================================================' -ForegroundColor Cyan
 Write-Host ''
@@ -196,24 +196,43 @@ if (-not $EnableInline -and -not $NonInteractive) {
     $inlineEnabled = ($inlineAns -match '^[Yy]$')
 }
 
-# 5. 先通过临时 staging 目录部署插件本体（含 LICENSE），保留旧版本直至配置全部提交成功
+# 5. 安全部署插件本体（含 LICENSE）：采用原地文件覆盖 + 独立备份，避免因残留进程占用工作目录导致 Move-Item 目录嵌套
 Write-Host '[3/4] 正在部署 TokenMeter 插件文件（含 MIT LICENSE）...' -ForegroundColor White
 New-Item -ItemType Directory -Path $DstPluginsRoot -Force | Out-Null
-$stageDir = Join-Path $DstPluginsRoot ('.antigravity-token-meter-stage-' + $PID + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
 $oldBackupDir = $null
 try {
-    New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
-    foreach ($item in @('assets', 'sidecars', 'plugin.json', 'LICENSE')) {
-        Copy-Item -LiteralPath (Join-Path $SrcPlugin $item) -Destination $stageDir -Recurse -Force
-    }
-    if (-not (Test-Path -LiteralPath (Join-Path $stageDir 'LICENSE') -PathType Leaf)) {
-        throw 'staging 目录缺少 LICENSE 文件'
-    }
     if (Test-Path -LiteralPath $DstPlugin) {
+        # 清理历史上因异常回滚可能残留的嵌套备份子目录
+        Get-ChildItem -LiteralPath $DstPlugin -Directory -Filter '.antigravity-token-meter-prev-*' -ErrorAction SilentlyContinue | ForEach-Object {
+            Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
         $oldBackupDir = Join-Path $DstPluginsRoot ('.antigravity-token-meter-prev-' + $PID + '-' + [guid]::NewGuid().ToString('N').Substring(0,6))
-        Move-Item -LiteralPath $DstPlugin -Destination $oldBackupDir -Force
+        New-Item -ItemType Directory -Path $oldBackupDir -Force | Out-Null
+        foreach ($item in @('assets', 'sidecars', 'plugin.json', 'LICENSE')) {
+            $oldItem = Join-Path $DstPlugin $item
+            if (Test-Path -LiteralPath $oldItem) {
+                Copy-Item -LiteralPath $oldItem -Destination $oldBackupDir -Recurse -Force
+            }
+        }
+    } else {
+        New-Item -ItemType Directory -Path $DstPlugin -Force | Out-Null
     }
-    Move-Item -LiteralPath $stageDir -Destination $DstPlugin -Force
+
+    # 逐项覆盖复制到目标目录（即使旧 sidecar 短时占用目录句柄也能无嵌套成功覆写）
+    foreach ($item in @('assets', 'sidecars', 'plugin.json', 'LICENSE')) {
+        $srcItem = Join-Path $SrcPlugin $item
+        if (Test-Path -LiteralPath $srcItem -PathType Container) {
+            $dstSub = Join-Path $DstPlugin $item
+            New-Item -ItemType Directory -Path $dstSub -Force | Out-Null
+            Copy-Item -Path (Join-Path $srcItem '*') -Destination $dstSub -Recurse -Force
+        } else {
+            Copy-Item -LiteralPath $srcItem -Destination $DstPlugin -Force
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $DstPlugin 'LICENSE') -PathType Leaf) -or
+        -not (Test-Path -LiteralPath (Join-Path $DstPlugin 'sidecars\meter\main.mjs') -PathType Leaf)) {
+        throw '插件目标目录校验失败：缺少关键文件'
+    }
     Write-Host ('      已安装至: ' + $DstPlugin) -ForegroundColor Green
 
     # 6. 无损合并本地 settings.json（保留已有 profile 等字段），并原子提交宿主 config.json
@@ -252,13 +271,20 @@ try {
         Remove-Item -LiteralPath $oldBackupDir -Recurse -Force -ErrorAction SilentlyContinue
     }
 } catch {
-    # 任意步骤失败自动回滚到旧插件目录
+    # 任意步骤失败按文件原位恢复，严禁对已存在目录使用 Move-Item 引发嵌套
     if ($oldBackupDir -and (Test-Path -LiteralPath $oldBackupDir)) {
-        if (Test-Path -LiteralPath $DstPlugin) { Remove-Item -LiteralPath $DstPlugin -Recurse -Force -ErrorAction SilentlyContinue }
-        Move-Item -LiteralPath $oldBackupDir -Destination $DstPlugin -Force -ErrorAction SilentlyContinue
-    }
-    if (Test-Path -LiteralPath $stageDir) {
-        Remove-Item -LiteralPath $stageDir -Recurse -Force -ErrorAction SilentlyContinue
+        New-Item -ItemType Directory -Path $DstPlugin -Force -ErrorAction SilentlyContinue | Out-Null
+        foreach ($item in @('assets', 'sidecars', 'plugin.json', 'LICENSE')) {
+            $bakItem = Join-Path $oldBackupDir $item
+            if (Test-Path -LiteralPath $bakItem -PathType Container) {
+                $dstSub = Join-Path $DstPlugin $item
+                New-Item -ItemType Directory -Path $dstSub -Force -ErrorAction SilentlyContinue | Out-Null
+                Copy-Item -Path (Join-Path $bakItem '*') -Destination $dstSub -Recurse -Force -ErrorAction SilentlyContinue
+            } elseif (Test-Path -LiteralPath $bakItem -PathType Leaf) {
+                Copy-Item -LiteralPath $bakItem -Destination $DstPlugin -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Remove-Item -LiteralPath $oldBackupDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     throw
 }
@@ -266,7 +292,7 @@ Write-Host '      已在 config.json 中同时启用 plugin 与 sidecar！' -For
 
 Write-Host ''
 Write-Host '================================================================' -ForegroundColor Green
-Write-Host '  Antigravity TokenMeter v1.1.1 安装完成！' -ForegroundColor Green
+Write-Host '  Antigravity TokenMeter v1.1.2 安装完成！' -ForegroundColor Green
 Write-Host '================================================================' -ForegroundColor Green
 Write-Host ''
 if ($inlineEnabled) {

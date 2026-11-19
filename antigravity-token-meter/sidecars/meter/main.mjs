@@ -28,7 +28,7 @@ import { buildInlineWidgetScript } from './src/ui/inline-bar.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
-const VERSION = String(PKG.version || '1.1.1');
+const VERSION = String(PKG.version || '1.1.2');
 const IS_HOST_SIDECAR = Boolean(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT);
 const IS_PREVIEW = process.argv.includes('--preview');
 
@@ -244,13 +244,32 @@ if (IS_HOST_SIDECAR) {
 
   await app.run();
 
-  if (await ownerLease.claim()) {
+  let claimRetryTimer = null;
+  const activateOwnership = () => {
+    if (claimRetryTimer) {
+      clearInterval(claimRetryTimer);
+      claimRetryTimer = null;
+    }
     // 先尝试解析一次 LS 端点，让 bridge 尽快获得可信 expectedHubPort
     void lsClient.resolveEndpoint(false);
     bridge.start();
     ownerLease.startHeartbeat(() => {
       void bridge.detachAll();
     });
+  };
+
+  if (await ownerLease.claim()) {
+    activateOwnership();
+  } else {
+    // 若快速重启时旧租约尚未过 TTL，定期重试接管，避免整个生命周期无法挂载
+    claimRetryTimer = setInterval(() => {
+      void (async () => {
+        if (await ownerLease.claim()) {
+          activateOwnership();
+        }
+      })();
+    }, 4000);
+    claimRetryTimer.unref?.();
   }
 
   let shutdownPromise = null;
@@ -259,6 +278,7 @@ if (IS_HOST_SIDECAR) {
       shutdownPromise = (async () => {
         const guard = setTimeout(() => process.exit(0), 8000);
         guard.unref?.();
+        if (claimRetryTimer) { clearInterval(claimRetryTimer); claimRetryTimer = null; }
         await bridge.stop();
         try { await ledger.flush(); } catch {}
         await ownerLease.release();
