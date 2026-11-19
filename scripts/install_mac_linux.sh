@@ -173,5 +173,5 @@ EOF
 fi
 
 echo ""
-echo "[完成] Antigravity TokenMeter v1.2.7 已安装至: $DST_PLUGIN"
+echo "[完成] Antigravity TokenMeter v1.2.8 已安装至: $DST_PLUGIN"
 echo "已在 config.json 中同时启用插件与 sidecar。"

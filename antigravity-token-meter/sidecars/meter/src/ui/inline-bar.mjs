@@ -419,8 +419,8 @@ export function buildInlineWidgetScript() {
               '<stop offset="100%" stop-color="var(--tm-gem-c)"/>' +
             '</linearGradient>' +
           '</defs>' +
-          '<path class="tm-star-main" d="M10.2 2.4 C11.3 8.8 13.4 10.9 19.8 12 C13.4 13.1 11.3 15.2 10.2 21.6 C9.1 15.2 7 13.1 0.6 12 C7 10.9 9.1 8.8 10.2 2.4 Z"/>' +
-          '<path class="tm-star-sub" d="M19.4 2.2 C19.9 4.5 20.6 5.2 22.9 5.7 C20.6 6.2 19.9 6.9 19.4 9.2 C18.9 6.9 18.2 6.2 15.9 5.7 C18.2 5.2 18.9 4.5 19.4 2.2 Z"/>' +
+          '<path class="tm-star-main" d="M10.2 3.2 C11.3 9.4 13.4 11.5 19.6 12.6 C13.4 13.7 11.3 15.8 10.2 22 C9.1 15.8 7 13.7 0.8 12.6 C7 11.5 9.1 9.4 10.2 3.2 Z"/>' +
+          '<path class="tm-star-sub" d="M19.4 2.4 C19.9 4.5 20.6 5.2 22.7 5.7 C20.6 6.2 19.9 6.9 19.4 9 C18.9 6.9 18.2 6.2 16.1 5.7 C18.2 5.2 18.9 4.5 19.4 2.4 Z"/>' +
         '</svg>';
       }
       return '<svg class="tm-star ' + cls + '" viewBox="0 0 24 24" aria-hidden="true">' +
@@ -625,7 +625,7 @@ export function buildInlineWidgetScript() {
         var streamText = conv && conv.streamingSeconds > 0 ? Number(conv.streamingSeconds).toFixed(1) + 's' : '--';
         return {
           title: t('cardSpeed'),
-          badge: isRunning ? ('· ' + t('generating')) : '',
+          badge: isRunning ? t('generating') : '',
           footCtx: modelLabel,
           body:
             '<div class="tm-hero">' +
@@ -757,7 +757,7 @@ export function buildInlineWidgetScript() {
         var um = usage || {};
         return {
           title: t('cardMonth'),
-          badge: um.monthKey ? ('· ' + um.monthKey) : '',
+          badge: um.monthKey || '',
           footCtx: (safeInt(um.activeDays) > 0 ? (safeInt(um.activeDays) + ' ' + t('activeDays')) : ''),
           body:
             '<div class="tm-hero">' +
@@ -810,7 +810,7 @@ export function buildInlineWidgetScript() {
         }).join('');
         return {
           title: t('moreMetrics'),
-          badge: isRunning ? ('· ' + t('generating')) : '',
+          badge: isRunning ? t('generating') : '',
           footCtx: modelLabel,
           body: '<div class="tm-more-list">' + metricRows + '</div>',
         };
@@ -820,7 +820,7 @@ export function buildInlineWidgetScript() {
       var ub = usage || {};
       return {
         title: t('brand'),
-        badge: isRunning ? ('· ' + t('generating')) : '',
+        badge: isRunning ? t('generating') : '',
         footCtx: modelLabel,
         body:
           '<div class="tm-usage-strip">' +
@@ -987,13 +987,13 @@ export function buildInlineWidgetScript() {
         .tm-more-k { color: var(--tm-muted); }
         .tm-more-v { font-family: var(--tm-mono); font-weight: 600; color: var(--tm-text); font-variant-numeric: tabular-nums; }
         .tm-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 1px; }
-        .tm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .14s ease, color .14s ease; line-height: 17px; font-size: 11.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
+        .tm-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 6px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .14s ease, color .14s ease; line-height: 1; font-size: 11.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
         .tm-chip:hover, .tm-chip:focus-visible, .tm-chip.active { background: var(--tm-hover); color: var(--tm-text); outline: none; }
         .tm-sep { width: 1px; height: 9px; background: var(--tm-sep); margin: 0 2px; display: inline-block; flex-shrink: 0; pointer-events: none; }
-        .tm-star { width: 15px; height: 15px; display: block; flex-shrink: 0; margin-top: -1px; filter: drop-shadow(0 0 2.5px var(--tm-gem-glow)); transition: transform .22s ease, filter .22s ease; }
+        .tm-star { width: 15px; height: 15px; display: block; flex-shrink: 0; filter: drop-shadow(0 0 2.5px var(--tm-gem-glow)); transition: transform .22s ease, filter .22s ease; }
         :host([data-density="compact"]) .tm-star,
         :host([data-density="tight"]) .tm-star { width: 14px; height: 14px; }
-        .tm-star-dual { width: 18px; height: 18px; margin-top: -1px; }
+        .tm-star-dual { width: 18px; height: 18px; }
         .tm-star .tm-star-main { fill: url(#tm-gem-bar); }
         .tm-star-dual .tm-star-main { fill: url(#tm-gem-dual); }
         .tm-star-dual .tm-star-sub { fill: var(--tm-gem-a); }
@@ -1005,23 +1005,23 @@ export function buildInlineWidgetScript() {
         @media (prefers-reduced-motion: reduce) {
           .tm-star:not(.tm-star-dual).live, .tm-star-dual.live .tm-star-main, .tm-star-dual.live .tm-star-sub { animation: none; }
         }
-        .tm-ring { width: 12.5px; height: 12.5px; display: inline-block; flex-shrink: 0; }
-        .tm-ring-lg { width: 24px; height: 24px; display: inline-block; flex-shrink: 0; }
+        .tm-ring { width: 13px; height: 13px; display: block; flex-shrink: 0; }
+        .tm-ring-lg { width: 24px; height: 24px; display: block; flex-shrink: 0; }
         .tm-ring-val { transition: stroke-dashoffset .45s cubic-bezier(0.22, 1, 0.36, 1), stroke .45s ease, stroke-opacity .25s ease; }
-        .tm-label { color: var(--tm-muted); font-size: 11px; font-weight: 400; letter-spacing: 0.01em; }
-        .tm-val { color: var(--tm-text); font-weight: 500; opacity: 0.9; letter-spacing: -0.01em; }
+        .tm-label { color: var(--tm-muted); font-size: 11px; font-weight: 400; letter-spacing: 0.01em; line-height: 1; }
+        .tm-val { color: var(--tm-text); font-weight: 500; opacity: 0.9; letter-spacing: -0.01em; line-height: 1; }
         .tm-chip:hover .tm-val, .tm-chip.active .tm-val { opacity: 1; }
         .tm-slash { color: var(--tm-faint); margin: 0 1.5px; font-weight: 400; }
-        .tm-unit { color: var(--tm-faint); font-size: 10.5px; margin-left: -2px; }
+        .tm-unit { color: var(--tm-faint); font-size: 10.5px; margin-left: -2px; line-height: 1; }
 
         .tm-popover { position: fixed; z-index: 2147483600; width: min(320px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); backdrop-filter: var(--tm-blur); -webkit-backdrop-filter: var(--tm-blur); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow); padding: 13px 14px 11px; box-sizing: border-box; display: none; }
         .tm-popover.open { display: block; }
-        .tm-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
-        .tm-brand-row { display: inline-flex; align-items: center; gap: 6px; min-width: 0; line-height: 18px; }
-        .tm-head-acts { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
-        .tm-model { font-size: 12.5px; font-weight: 650; color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 145px; letter-spacing: -0.015em; line-height: 18px; }
-        .tm-status-tag { font-size: 10px; color: var(--tm-accent); font-weight: 500; flex-shrink: 0; }
-        .tm-btn { border: 1px solid var(--tm-border); background: transparent; color: var(--tm-sub); border-radius: 5px; padding: 2px 6px; font-size: 10.5px; font-weight: 500; cursor: pointer; font-family: inherit; transition: border-color .14s, color .14s, background .14s; }
+        .tm-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 22px; margin-bottom: 10px; }
+        .tm-brand-row { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 22px; }
+        .tm-head-acts { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; height: 22px; }
+        .tm-model { display: inline-flex; align-items: center; font-size: 12.5px; font-weight: 650; color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 125px; letter-spacing: -0.015em; line-height: 1; }
+        .tm-status-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 99px; background: var(--tm-hover); font-family: var(--tm-mono); font-size: 10px; color: var(--tm-accent); font-weight: 500; line-height: 1; flex-shrink: 0; }
+        .tm-btn { display: inline-flex; align-items: center; justify-content: center; height: 22px; border: 1px solid var(--tm-border); background: transparent; color: var(--tm-sub); border-radius: 5px; padding: 0 7px; font-size: 10.5px; font-weight: 500; line-height: 1; cursor: pointer; font-family: inherit; transition: border-color .14s, color .14s, background .14s; }
         .tm-btn:hover, .tm-btn:focus-visible { border-color: var(--tm-text); color: var(--tm-text); background: var(--tm-hover); outline: none; }
 
         .tm-hero { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
