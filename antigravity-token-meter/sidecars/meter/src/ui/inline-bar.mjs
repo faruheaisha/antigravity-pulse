@@ -241,6 +241,52 @@ export function buildInlineWidgetScript() {
       return null;
     }
 
+    /**
+     * 优先定位输入框底栏（.agy-composer-footer）中右侧操作组之前，实现与「极速 ▾」同行齐平内嵌；
+     * 窗口过窄（< 620px）或未找到底栏结构时自动回退至输入框下方，防止挤压按钮。
+     */
+    function findMountAnchor() {
+      var box = findComposerContainer();
+      if (!box) return null;
+
+      var footer = box.querySelector('.agy-composer-footer');
+      if (!footer) {
+        var permBtn = box.querySelector('[data-testid="permissions-selector-trigger"], [data-testid="send-button"], [data-testid="stop-button"]');
+        if (permBtn) {
+          var p = permBtn.parentElement;
+          for (var d = 0; d < 4 && p && p !== box; d++) {
+            var cs = getComputedStyle(p);
+            if (cs.display === 'flex' && cs.flexDirection === 'row' && p.children.length >= 2) {
+              footer = p;
+              break;
+            }
+            p = p.parentElement;
+          }
+        }
+      }
+
+      if (footer && isVisible(footer)) {
+        var fw = footer.getBoundingClientRect().width;
+        var rightGroup = null;
+        var anchorTrigger = footer.querySelector('[data-testid="permissions-selector-trigger"], [data-testid="send-button"], [data-testid="stop-button"]');
+        if (anchorTrigger) {
+          var cur = anchorTrigger;
+          while (cur && cur.parentElement && cur.parentElement !== footer) {
+            cur = cur.parentElement;
+          }
+          if (cur && cur.parentElement === footer) rightGroup = cur;
+        }
+        if (!rightGroup && footer.children.length >= 2) {
+          rightGroup = footer.lastElementChild;
+        }
+        if (rightGroup && fw >= 620) {
+          return { parent: footer, before: rightGroup, placement: 'inline-footer' };
+        }
+      }
+
+      return { parent: box, before: null, placement: 'below' };
+    }
+
     function buildSparkleIcon(cls, dual) {
       if (dual) {
         return '<svg class="tm-star tm-star-dual ' + cls + '" viewBox="0 0 24 24" aria-hidden="true">' +
@@ -488,6 +534,22 @@ export function buildInlineWidgetScript() {
           50% { opacity: 1; transform: scale(1.1); }
         }
         .tm-bar-wrap { position: relative; display: flex; align-items: center; padding: 3px 6px 2px; user-select: none; }
+        :host([data-placement="inline-footer"]) {
+          display: inline-flex;
+          align-items: center;
+          flex-shrink: 0;
+          height: 28px;
+          margin-right: 6px;
+        }
+        :host([data-placement="inline-footer"]) .tm-bar-wrap {
+          padding: 0 2px;
+          height: 28px;
+          display: inline-flex;
+          align-items: center;
+        }
+        :host([data-placement="inline-footer"]) .tm-chips {
+          flex-wrap: nowrap;
+        }
         .tm-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 1px; }
         .tm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .14s ease, color .14s ease; line-height: 17px; font-size: 11.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
         .tm-chip:hover, .tm-chip:focus-visible { background: var(--tm-hover); color: var(--tm-text); outline: none; }
@@ -971,12 +1033,11 @@ export function buildInlineWidgetScript() {
 
     function ensureMounted() {
       if (state.disposed) return;
-      var container = findComposerContainer();
-      if (!container) {
+      var anchor = findMountAnchor();
+      if (!anchor || !anchor.parent) {
         if (hostEl && hostEl.isConnected) hostEl.remove();
         return;
       }
-      if (hostEl && hostEl.isConnected && container.contains(hostEl)) return;
 
       if (!hostEl) {
         hostEl = document.createElement('div');
@@ -1010,7 +1071,19 @@ export function buildInlineWidgetScript() {
         });
       }
 
-      container.appendChild(hostEl);
+      var samePlacement = hostEl.getAttribute('data-placement') === anchor.placement;
+      var alreadyPlaced =
+        samePlacement &&
+        hostEl.parentElement === anchor.parent &&
+        (anchor.before ? hostEl.nextElementSibling === anchor.before : hostEl.nextElementSibling === null);
+      if (alreadyPlaced) return;
+
+      hostEl.setAttribute('data-placement', anchor.placement);
+      if (anchor.before && anchor.before.parentElement === anchor.parent) {
+        anchor.parent.insertBefore(hostEl, anchor.before);
+      } else {
+        anchor.parent.appendChild(hostEl);
+      }
       renderBar();
     }
 
@@ -1069,6 +1142,7 @@ export function buildInlineWidgetScript() {
     }
 
     function onViewportChange() {
+      ensureMounted();
       if (state.popoverOpen) positionPopover();
     }
 

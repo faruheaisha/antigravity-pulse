@@ -5,10 +5,10 @@
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.2 安装器' } catch {}
+try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.3 安装器' } catch {}
 
 Write-Host '================================================================' -ForegroundColor Cyan
-Write-Host '  Antigravity TokenMeter v1.1.2 (MIT License)' -ForegroundColor Cyan
+Write-Host '  Antigravity TokenMeter v1.1.3 (MIT License)' -ForegroundColor Cyan
 Write-Host '  支持侧边栏面板 + 可选实验性底部内嵌状态条（不修改 app.asar）' -ForegroundColor Cyan
 Write-Host '================================================================' -ForegroundColor Cyan
 Write-Host ''
@@ -292,7 +292,7 @@ Write-Host '      已在 config.json 中同时启用 plugin 与 sidecar！' -For
 
 Write-Host ''
 Write-Host '================================================================' -ForegroundColor Green
-Write-Host '  Antigravity TokenMeter v1.1.2 安装完成！' -ForegroundColor Green
+Write-Host '  Antigravity TokenMeter v1.1.3 安装完成！' -ForegroundColor Green
 Write-Host '================================================================' -ForegroundColor Green
 Write-Host ''
 if ($inlineEnabled) {
