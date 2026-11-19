@@ -28,6 +28,10 @@ export function buildInlineWidgetScript() {
       confirmedPrefVersion: 0,
       popoverOpen: false,
       pinned: false,
+      activeTab: 'speed',
+      pointerInPop: false,
+      lastRenderedTab: '',
+      lastPopHtml: '',
       modalOpen: false,
       dark: false,
       lastCid: null,
@@ -441,6 +445,224 @@ export function buildInlineWidgetScript() {
       '</div>';
     }
 
+    function buildDailyTrendSvg(days, todayDate) {
+      var dayMap = Object.create(null);
+      (days || []).forEach(function(d) {
+        if (d && d.date) dayMap[d.date] = safeInt(d.total);
+      });
+      var now = new Date();
+      var bars = [];
+      var maxVal = 1;
+      for (var i = 13; i >= 0; i--) {
+        var dt = new Date(now);
+        dt.setDate(dt.getDate() - i);
+        var key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+        var v = dayMap[key] || 0;
+        if (v > maxVal) maxVal = v;
+        bars.push({ key: key, val: v, isToday: key === todayDate || i === 0 });
+      }
+      var w = 278, h = 42, slot = w / bars.length, bw = Math.max(8, slot - 5);
+      var rects = bars.map(function(b, idx) {
+        var bh = b.val > 0 ? Math.max(4, Math.round((b.val / maxVal) * (h - 6))) : 2;
+        var x = idx * slot + (slot - bw) / 2;
+        var y = h - bh;
+        var fill = b.val <= 0 ? 'var(--tm-elev)' : b.isToday ? 'var(--tm-accent)' : 'var(--tm-ink-bar)';
+        var op = b.val <= 0 ? 1 : b.isToday ? 1 : (0.28 + 0.55 * (b.val / maxVal));
+        return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh + '" rx="2" fill="' + fill + '" fill-opacity="' + op.toFixed(2) + '"><title>' + escapeHtml(b.key + ': ' + fmtTokens(b.val)) + '</title></rect>';
+      }).join('');
+      return '<svg class="tm-trend" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
+        '<line x1="0" y1="' + (h - 0.5) + '" x2="' + w + '" y2="' + (h - 0.5) + '" stroke="var(--tm-hairline)"/>' +
+        rects +
+      '</svg>';
+    }
+
+    function buildContextLargeRingSvg(frac) {
+      var hasVal = typeof frac === 'number' && Number.isFinite(frac);
+      var clamped = hasVal ? Math.max(0, Math.min(1, frac)) : 0;
+      var r = 10.5;
+      var circ = 2 * Math.PI * r;
+      var offset = circ * (1 - clamped);
+      var stroke = interpCtxColor(clamped);
+      return '<svg class="tm-ring-lg" viewBox="0 0 26 26" aria-hidden="true">' +
+        '<circle cx="13" cy="13" r="' + r + '" fill="none" stroke="var(--tm-ring-track)" stroke-width="2.4"/>' +
+        '<circle cx="13" cy="13" r="' + r + '" fill="none" stroke="' + stroke + '" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="' + circ.toFixed(3) + '" stroke-dashoffset="' + offset.toFixed(3) + '" stroke-opacity="' + (clamped > 0 ? '1' : '0') + '" transform="rotate(-90 13 13)"/>' +
+      '</svg>';
+    }
+
+    /**
+     * 按当前悬停/固定激活的格子渲染独立精简卡片，做到“每一格只显示对应内容”。
+     */
+    function buildFocusedPopoverModel(tab, snap, conv, usage, quotas) {
+      var modelLabel = (conv && conv.model) || (snap && snap.conversationUnavailable ? t('convUnavailable') : snap && snap.connected ? t('connected') : t('offline'));
+      var isRunning = Boolean(conv && conv.running);
+
+      if (tab === 'speed') {
+        var heroNum = conv && conv.latestTps != null ? Number(conv.latestTps).toFixed(1) : (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--');
+        var measuredText = conv ? (safeInt(conv.measuredRequests) + ' / ' + safeInt(conv.requests)) : '--';
+        var streamText = conv && conv.streamingSeconds > 0 ? Number(conv.streamingSeconds).toFixed(1) + 's' : '--';
+        return {
+          title: t('cardSpeed'),
+          badge: isRunning ? ('· ' + t('generating')) : '',
+          footCtx: modelLabel,
+          body:
+            '<div class="tm-hero">' +
+              '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(heroNum) + '</span><span class="tm-hero-unit">' + escapeHtml(t('speedUnit')) + '</span></div>' +
+              '<div class="tm-hero-meta">' + escapeHtml(t('streamTime')) + ' <b>' + escapeHtml(streamText) + '</b></div>' +
+            '</div>' +
+            '<div class="tm-spark-wrap">' + buildSparklineSvg(conv && conv.sparkline) + '</div>' +
+            '<div class="tm-sub-strip tm-sub-strip-tight">' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('sessionSpeed')) + '</div><div class="tm-sub-v">' + (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--') + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('ttft')) + '</div><div class="tm-sub-v">' + (conv && conv.ttftSeconds != null ? Number(conv.ttftSeconds).toFixed(2) + 's' : '--') + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('measuredReq')) + '</div><div class="tm-sub-v">' + escapeHtml(measuredText) + '</div></div>' +
+            '</div>',
+        };
+      }
+
+      if (tab === 'cache') {
+        var cacheVal = conv && conv.cacheHitRate;
+        var tokens = conv && conv.tokens;
+        var inAll = safeInt(tokens && tokens.inputAll);
+        var outAll = safeInt(tokens && tokens.output);
+        return {
+          title: t('cardCache'),
+          badge: '',
+          footCtx: modelLabel,
+          body:
+            '<div class="tm-hero">' +
+              '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(fmtPct(cacheVal)) + '</span><span class="tm-hero-unit">' + escapeHtml(t('cacheHit')) + '</span></div>' +
+              '<div class="tm-hero-meta">' + escapeHtml(t('totalInput')) + ' <b>' + escapeHtml(fmtTokens(inAll)) + '</b><br/>' + escapeHtml(t('totalOutput')) + ' <b>' + escapeHtml(fmtTokens(outAll)) + '</b></div>' +
+            '</div>' +
+            (conv ? ('<div class="tm-sec tm-sec-flush">' + buildTokenBreakdownHtml(conv) + '</div>') : ('<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>')),
+        };
+      }
+
+      if (tab === 'context') {
+        var ctx = conv && conv.context;
+        var ctxFrac = ctx ? ctx.usedFraction : null;
+        var ctxPct = typeof ctxFrac === 'number' && Number.isFinite(ctxFrac) ? Math.round(Math.max(0, Math.min(1, ctxFrac)) * 100) : 0;
+        var turnsText = ctx && ctx.estimatedTurnsLeft ? (t('turnsLeft') + ' ' + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')) : '';
+        return {
+          title: t('cardContext'),
+          badge: '',
+          footCtx: modelLabel,
+          body: ctx ? (
+            '<div class="tm-hero">' +
+              '<div class="tm-hero-main tm-hero-ctx">' + buildContextLargeRingSvg(ctxFrac) + '<span class="tm-hero-num">' + escapeHtml(fmtPct(ctxFrac)) + '</span></div>' +
+              '<div class="tm-hero-meta">' + (turnsText ? ('<b>' + escapeHtml(turnsText) + '</b><br/>') : '') + escapeHtml(fmtTokens(ctx.usedTokens) + ' / ' + fmtTokens(ctx.maxTokens)) + '</div>' +
+            '</div>' +
+            '<div class="tm-ctx-bar"><div class="tm-ctx-fill" style="width:' + ctxPct + '%;background:' + interpCtxColor(ctxFrac) + '"></div></div>' +
+            '<div class="tm-sub-strip tm-sub-strip-tight">' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('usedTokens')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.usedTokens)) + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('remaining')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.remainingTokens)) + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('windowCap')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(ctx.maxTokens)) + '</div></div>' +
+            '</div>' +
+            '<div class="tm-ctx-note ' + (ctxFrac >= 0.8 ? 'high' : '') + '">' + escapeHtml(ctxFrac >= 0.8 ? t('ctxHigh') : t('ctxHealthy')) + '</div>'
+          ) : ('<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>'),
+        };
+      }
+
+      if (tab === 'quota') {
+        var qHtml = quotas.slice(0, 5).map(function(q) {
+          if (q.fiveHour && q.weekly) {
+            var worst = (q.fiveHour.pacing && q.fiveHour.pacing.status === 'burn') || (q.weekly.pacing && q.weekly.pacing.status === 'burn')
+              ? 'burn'
+              : (q.fiveHour.pacing && q.fiveHour.pacing.status === 'fast') || (q.weekly.pacing && q.weekly.pacing.status === 'fast')
+                ? 'fast' : 'ok';
+            var paceLabel = worst === 'burn' ? t('paceBurn') : worst === 'fast' ? t('paceFast') : t('paceOk');
+            var pairHtml = escapeHtml(fmtPctNum(q.fiveHour.remainingFraction)) + '<span class="tm-slash">/</span>' + escapeHtml(fmtPctNum(q.weekly.remainingFraction));
+            return '<div class="tm-qitem"><div class="tm-qmeta"><span class="tm-qname" title="' + escapeHtml(q.title) + '">' + escapeHtml(q.title) +
+              '</span><span class="tm-qright"><span class="tm-pace-pill ' + worst + '">' + escapeHtml(paceLabel) + '</span><span class="tm-qpair" title="' + escapeHtml(t('quotaPairTip')) + '">' + pairHtml + '</span></span></div>' +
+              renderQuotaSubBar(t('quotaTag5h'), q.fiveHour.remainingFraction, q.fiveHour.resetTime, q.fiveHour.pacing) +
+              renderQuotaSubBar(t('quotaTagWeek'), q.weekly.remainingFraction, q.weekly.resetTime, q.weekly.pacing) +
+            '</div>';
+          }
+          var kind = resolveQuotaKind(q);
+          var tag = kind === '5h' ? t('quotaTag5h') : kind === 'week' ? t('quotaTagWeek') : '';
+          return '<div class="tm-qitem"><div class="tm-qmeta"><span class="tm-qname" title="' + escapeHtml(q.title) + '">' + escapeHtml(q.title) + '</span></div>' +
+            renderQuotaSubBar(tag || '·', q.remainingFraction, q.resetTime, q.pacing) + '</div>';
+        }).join('');
+        return {
+          title: t('quotaTitle'),
+          badge: '',
+          footCtx: t('quotaPairTip'),
+          body: '<div class="tm-sec-title" style="margin-bottom:8px;"><span>' + escapeHtml(t('paceLegend')) + '</span><span>5h / ' + escapeHtml(t('quotaTagWeek')) + '</span></div>' +
+            (qHtml || '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>'),
+        };
+      }
+
+      if (tab === 'today') {
+        var u = usage || {};
+        var tTotal = safeInt(u.todayTokens);
+        var mTotal = safeInt(u.monthTokens);
+        var shareText = mTotal > 0 ? Math.min(100, Math.round((tTotal / mTotal) * 100)) + '%' : '--';
+        var models = Array.isArray(u.todayByModel) ? u.todayByModel.slice(0, 4) : [];
+        var topMax = models.length ? Math.max(1, safeInt(models[0].totalTokens)) : 1;
+        var modelBars = models.map(function(m) {
+          var pct = Math.max(3, Math.round((safeInt(m.totalTokens) / topMax) * 100));
+          return '<div class="tm-mbar-row">' +
+            '<div class="tm-mbar-meta"><span class="tm-mbar-name" title="' + escapeHtml(m.model) + '">' + escapeHtml(m.model) + '</span><span class="tm-mbar-val">' + escapeHtml(fmtTokens(m.totalTokens)) + '</span></div>' +
+            '<div class="tm-mbar-track"><div class="tm-mbar-fill" style="width:' + pct + '%"></div></div>' +
+          '</div>';
+        }).join('');
+        return {
+          title: t('cardToday'),
+          badge: '',
+          footCtx: u.todayDate || '',
+          body:
+            '<div class="tm-hero">' +
+              '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(fmtTokens(tTotal)) + '</span><span class="tm-hero-unit">tokens</span></div>' +
+              '<div class="tm-hero-meta"><b>' + safeInt(u.todayRequests).toLocaleString() + '</b> ' + escapeHtml(t('requests')) + '<br/>' + escapeHtml(t('todayShare')) + ' <b>' + escapeHtml(shareText) + '</b></div>' +
+            '</div>' +
+            '<div class="tm-sub-strip">' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('uncachedIn')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(u.todayInput)) + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('cacheRead')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(u.todayCacheRead)) + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('totalOutput')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtTokens(u.todayOutput)) + '</div></div>' +
+            '</div>' +
+            (modelBars ? ('<div class="tm-sec-title"><span>' + escapeHtml(t('todayModels')) + '</span></div><div class="tm-mbar-list">' + modelBars + '</div>') : ('<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>')),
+        };
+      }
+
+      if (tab === 'month') {
+        var um = usage || {};
+        return {
+          title: t('cardMonth'),
+          badge: um.monthKey ? ('· ' + um.monthKey) : '',
+          footCtx: (safeInt(um.activeDays) > 0 ? (safeInt(um.activeDays) + ' ' + t('activeDays')) : ''),
+          body:
+            '<div class="tm-hero">' +
+              '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(fmtTokens(um.monthTokens)) + '</span><span class="tm-hero-unit">tokens</span></div>' +
+              '<div class="tm-hero-meta"><b>' + safeInt(um.monthRequests).toLocaleString() + '</b> ' + escapeHtml(t('requests')) + '<br/>' + escapeHtml(t('lifetime')) + ' <b>' + escapeHtml(fmtTokens(um.totalTokens)) + '</b></div>' +
+            '</div>' +
+            '<div class="tm-sec-title" style="margin-bottom:4px;"><span>' + escapeHtml(t('dailyTrend')) + '</span></div>' +
+            '<div class="tm-trend-wrap">' + buildDailyTrendSvg(um.days, um.todayDate) + '</div>' +
+            '<div class="tm-sec" style="margin-top:8px;padding-top:8px;">' +
+              '<div class="tm-usage-strip">' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('today')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(um.todayTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('week')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(um.weekTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('month')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(um.monthTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('lifetime')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(um.totalTokens)) + '</div></div>' +
+              '</div>' +
+              '<div class="tm-usage-sub"><span>' + escapeHtml(t('cacheRead')) + ' ' + escapeHtml(fmtTokens(um.monthCacheRead)) + '</span><span>' + escapeHtml(t('uncachedIn')) + ' ' + escapeHtml(fmtTokens(um.monthInput)) + '</span><span>' + escapeHtml(t('totalOutput')) + ' ' + escapeHtml(fmtTokens(um.monthOutput)) + '</span></div>' +
+            '</div>',
+        };
+      }
+
+      // 兜底（当用户隐藏全部单项仅剩品牌图标时）
+      var ub = usage || {};
+      return {
+        title: t('brand'),
+        badge: isRunning ? ('· ' + t('generating')) : '',
+        footCtx: modelLabel,
+        body:
+          '<div class="tm-usage-strip">' +
+            '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('today')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(ub.todayTokens)) + '</div></div>' +
+            '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('week')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(ub.weekTokens)) + '</div></div>' +
+            '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('month')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(ub.monthTokens)) + '</div></div>' +
+            '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('lifetime')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(ub.totalTokens)) + '</div></div>' +
+          '</div>',
+      };
+    }
+
     function baseStyles() {
       return \`
         :host {
@@ -561,7 +783,7 @@ export function buildInlineWidgetScript() {
         }
         .tm-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 1px; }
         .tm-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .14s ease, color .14s ease; line-height: 17px; font-size: 11.5px; font-variant-numeric: tabular-nums; font-family: inherit; }
-        .tm-chip:hover, .tm-chip:focus-visible { background: var(--tm-hover); color: var(--tm-text); outline: none; }
+        .tm-chip:hover, .tm-chip:focus-visible, .tm-chip.active { background: var(--tm-hover); color: var(--tm-text); outline: none; }
         .tm-sep { width: 1px; height: 9px; background: var(--tm-sep); margin: 0 2px; display: inline-block; flex-shrink: 0; pointer-events: none; }
         .tm-star { width: 12px; height: 12px; display: inline-block; flex-shrink: 0; transition: transform .22s ease; }
         .tm-star-dual { width: 15px; height: 15px; }
@@ -573,38 +795,41 @@ export function buildInlineWidgetScript() {
         .tm-star:not(.tm-star-dual).live { animation: tm-star-turn 3.4s ease-in-out infinite; }
         .tm-star-dual.live .tm-star-main { transform-box: fill-box; transform-origin: center; animation: tm-star-turn 3.4s ease-in-out infinite; }
         .tm-star-dual.live .tm-star-sub { transform-box: fill-box; transform-origin: center; animation: tm-star-blink 2s ease-in-out infinite; }
-        .tm-chip:hover .tm-star.idle { transform: rotate(22deg); }
-        .tm-chip:hover .tm-star.idle .tm-star-main { fill: var(--tm-accent); }
+        .tm-chip:hover .tm-star.idle, .tm-chip.active .tm-star.idle { transform: rotate(22deg); }
+        .tm-chip:hover .tm-star.idle .tm-star-main, .tm-chip.active .tm-star.idle .tm-star-main { fill: var(--tm-accent); }
         @media (prefers-reduced-motion: reduce) {
           .tm-star:not(.tm-star-dual).live, .tm-star-dual.live .tm-star-main, .tm-star-dual.live .tm-star-sub { animation: none; }
         }
         .tm-ring { width: 12.5px; height: 12.5px; display: inline-block; flex-shrink: 0; }
+        .tm-ring-lg { width: 24px; height: 24px; display: inline-block; flex-shrink: 0; }
         .tm-ring-val { transition: stroke-dashoffset .45s cubic-bezier(0.22, 1, 0.36, 1), stroke .45s ease, stroke-opacity .25s ease; }
         .tm-label { color: var(--tm-muted); font-size: 11px; font-weight: 400; letter-spacing: 0.01em; }
         .tm-val { color: var(--tm-text); font-weight: 500; opacity: 0.9; letter-spacing: -0.01em; }
-        .tm-chip:hover .tm-val { opacity: 1; }
+        .tm-chip:hover .tm-val, .tm-chip.active .tm-val { opacity: 1; }
         .tm-slash { color: var(--tm-faint); margin: 0 1.5px; font-weight: 400; }
         .tm-unit { color: var(--tm-faint); font-size: 10.5px; margin-left: -2px; }
 
-        .tm-popover { position: fixed; z-index: 2147483600; width: min(322px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); backdrop-filter: var(--tm-blur); -webkit-backdrop-filter: var(--tm-blur); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow); padding: 14px 15px 12px; box-sizing: border-box; display: none; }
+        .tm-popover { position: fixed; z-index: 2147483600; width: min(308px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); backdrop-filter: var(--tm-blur); -webkit-backdrop-filter: var(--tm-blur); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow); padding: 13px 14px 11px; box-sizing: border-box; display: none; }
         .tm-popover.open { display: block; }
         .tm-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
         .tm-brand-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
         .tm-head-acts { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; }
-        .tm-model { font-size: 11.5px; font-weight: 600; color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 155px; letter-spacing: -0.01em; }
+        .tm-model { font-size: 11.5px; font-weight: 600; color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 145px; letter-spacing: -0.01em; }
         .tm-status-tag { font-size: 10px; color: var(--tm-accent); font-weight: 500; flex-shrink: 0; }
         .tm-btn { border: 1px solid var(--tm-border); background: transparent; color: var(--tm-sub); border-radius: 5px; padding: 2px 6px; font-size: 10.5px; font-weight: 500; cursor: pointer; font-family: inherit; transition: border-color .14s, color .14s, background .14s; }
         .tm-btn:hover, .tm-btn:focus-visible { border-color: var(--tm-text); color: var(--tm-text); background: var(--tm-hover); outline: none; }
 
         .tm-hero { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
         .tm-hero-main { display: inline-flex; align-items: baseline; gap: 4px; }
-        .tm-hero-num { font-size: 27px; font-weight: 650; line-height: 1; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; color: var(--tm-text); }
+        .tm-hero-ctx { align-items: center; gap: 7px; }
+        .tm-hero-num { font-size: 26px; font-weight: 650; line-height: 1; letter-spacing: -0.035em; font-variant-numeric: tabular-nums; color: var(--tm-text); }
         .tm-hero-unit { font-size: 11px; color: var(--tm-muted); font-weight: 500; }
         .tm-hero-meta { font-size: 10.5px; color: var(--tm-muted); text-align: right; font-variant-numeric: tabular-nums; line-height: 1.45; }
         .tm-hero-meta b { color: var(--tm-text); font-weight: 600; }
-        .tm-spark-wrap { color: var(--tm-text); margin: 2px 0 9px; }
-        .tm-spark { display: block; overflow: visible; }
+        .tm-spark-wrap, .tm-trend-wrap { color: var(--tm-text); margin: 2px 0 9px; }
+        .tm-spark, .tm-trend { display: block; overflow: visible; }
         .tm-sub-strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--tm-hairline); border-bottom: 1px solid var(--tm-hairline); padding: 7px 0; margin-bottom: 9px; }
+        .tm-sub-strip-tight { margin-bottom: 0; border-bottom: none; padding-bottom: 1px; }
         .tm-sub-cell { padding: 0 8px; border-left: 1px solid var(--tm-hairline); }
         .tm-sub-cell:first-child { padding-left: 0; border-left: none; }
         .tm-sub-k { font-size: 10px; color: var(--tm-muted); margin-bottom: 2px; }
@@ -614,6 +839,20 @@ export function buildInlineWidgetScript() {
         .tm-usage-cell:first-child { padding-left: 0; border-left: none; }
         .tm-usage-k { font-size: 9.5px; color: var(--tm-muted); margin-bottom: 2px; }
         .tm-usage-v { font-family: var(--tm-mono); font-size: 11.5px; font-weight: 600; color: var(--tm-text); }
+        .tm-usage-sub { margin-top: 7px; font-family: var(--tm-mono); font-size: 10px; color: var(--tm-muted); display: flex; justify-content: space-between; gap: 6px; flex-wrap: wrap; }
+        .tm-ctx-bar { width: 100%; height: 5px; border-radius: 99px; background: var(--tm-elev); overflow: hidden; margin: 5px 0 9px; }
+        .tm-ctx-fill { height: 100%; border-radius: 99px; transition: width .35s ease, background-color .35s ease; }
+        .tm-ctx-note { font-size: 10px; color: var(--tm-muted); margin-top: 7px; }
+        .tm-ctx-note.high { color: var(--tm-warn); font-weight: 500; }
+        .tm-mbar-list { display: flex; flex-direction: column; gap: 6px; }
+        .tm-mbar-row { display: flex; flex-direction: column; gap: 3px; }
+        .tm-mbar-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; gap: 8px; }
+        .tm-mbar-name { color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-mbar-val { font-family: var(--tm-mono); font-size: 10.5px; color: var(--tm-sub); flex-shrink: 0; }
+        .tm-mbar-track { width: 100%; height: 3px; border-radius: 99px; background: var(--tm-elev); overflow: hidden; }
+        .tm-mbar-fill { height: 100%; border-radius: 99px; background: var(--tm-ink-bar); opacity: 0.72; }
+        .tm-mbar-row:first-child .tm-mbar-fill { background: var(--tm-accent); opacity: 1; }
+        .tm-sec-flush { margin-top: 8px; padding-top: 8px; }
 
         .tm-micro-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 10px; color: var(--tm-muted); margin-bottom: 5px; }
         .tm-fresh { display: inline-flex; align-items: center; gap: 4px; }
@@ -715,10 +954,12 @@ export function buildInlineWidgetScript() {
       var vv = window.visualViewport;
       var vw = vv ? vv.width : window.innerWidth;
       var vh = vv ? vv.height : window.innerHeight;
-      var rect = hostEl.getBoundingClientRect();
-      var pw = pop.offsetWidth || 322;
-      var ph = pop.offsetHeight || 390;
-      var left = Math.max(10, Math.min(vw - pw - 10, rect.left + 6));
+      var anchorEl = shadow.querySelector('[data-tm-chip="' + state.activeTab + '"]') || hostEl;
+      var rect = anchorEl.getBoundingClientRect();
+      var pw = pop.offsetWidth || 308;
+      var ph = pop.offsetHeight || 220;
+      var centeredLeft = rect.left + rect.width / 2 - pw / 2;
+      var left = Math.max(10, Math.min(vw - pw - 10, centeredLeft));
       var top = rect.top - ph - 8;
       if (top < 10) top = Math.max(10, Math.min(vh - ph - 10, rect.bottom + 8));
       pop.style.left = Math.round(left) + 'px';
@@ -753,6 +994,16 @@ export function buildInlineWidgetScript() {
       var showQuota = prefs.showQuota !== false && hasQuota;
       var showToday = prefs.showToday === true && Boolean(usage);
       var showMonth = prefs.showMonth === true && Boolean(usage);
+      var visibleTabs = [];
+      if (showSpeed) visibleTabs.push('speed');
+      if (showCache) visibleTabs.push('cache');
+      if (showContext) visibleTabs.push('context');
+      if (showQuota) visibleTabs.push('quota');
+      if (showToday) visibleTabs.push('today');
+      if (showMonth) visibleTabs.push('month');
+      if (visibleTabs.length === 0) visibleTabs.push('brand');
+      if (visibleTabs.indexOf(state.activeTab) < 0) state.activeTab = visibleTabs[0];
+
       var langKey = prefs.language === 'en' ? 'en' : 'zh-CN';
       var layoutKey = [langKey, showSpeed ? 1 : 0, showCache ? 1 : 0, showContext ? 1 : 0, showQuota ? 1 : 0, showToday ? 1 : 0, showMonth ? 1 : 0].join(':');
 
@@ -762,31 +1013,33 @@ export function buildInlineWidgetScript() {
           var barStar = buildSparkleIcon(starCls, false);
           var chipItems = [];
           if (showSpeed) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + barStar + '<span class="tm-val" data-tm-v="speed">--</span><span class="tm-unit">' + escapeHtml(t('speedUnit')) + '</span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="speed" data-tm-trigger="1">' + barStar + '<span class="tm-val" data-tm-v="speed">--</span><span class="tm-unit">' + escapeHtml(t('speedUnit')) + '</span></button>');
           }
           if (showCache) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('cacheHit')) + '</span><span class="tm-val" data-tm-v="cache">--</span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="cache" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('cacheHit')) + '</span><span class="tm-val" data-tm-v="cache">--</span></button>');
           }
           if (showContext) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + buildContextRingSvg(ctxFrac, 'bar') + '<span class="tm-label">' + escapeHtml(t('context')) + '</span><span class="tm-val" data-tm-v="ctx">--</span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="context" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + buildContextRingSvg(ctxFrac, 'bar') + '<span class="tm-label">' + escapeHtml(t('context')) + '</span><span class="tm-val" data-tm-v="ctx">--</span></button>');
           }
           if (showQuota) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1" title="' + escapeHtml(t('quotaPairTip')) + '">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('quota')) + '</span><span class="tm-val" data-tm-v="quota"><span data-tm-q="l">--</span><span class="tm-slash">/</span><span data-tm-q="r">--</span></span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="quota" data-tm-trigger="1" title="' + escapeHtml(t('quotaPairTip')) + '">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('quota')) + '</span><span class="tm-val" data-tm-v="quota"><span data-tm-q="l">--</span><span class="tm-slash">/</span><span data-tm-q="r">--</span></span></button>');
           }
           if (showToday) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val" data-tm-v="today">--</span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="today" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val" data-tm-v="today">--</span></button>');
           }
           if (showMonth) {
-            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('month')) + '</span><span class="tm-val" data-tm-v="month">--</span></button>');
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="month" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('month')) + '</span><span class="tm-val" data-tm-v="month">--</span></button>');
           }
           chipsEl.innerHTML = chipItems.length
             ? chipItems.join('<span class="tm-sep" aria-hidden="true"></span>')
-            : '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + barStar + '<span class="tm-val">' + escapeHtml(t('brand')) + '</span></button>';
+            : '<button class="tm-chip" type="button" aria-expanded="false" data-tm-chip="brand" data-tm-trigger="1">' + barStar + '<span class="tm-val">' + escapeHtml(t('brand')) + '</span></button>';
           state.barLayoutKey = layoutKey;
         }
 
-        chipsEl.querySelectorAll('[data-tm-trigger]').forEach(function(btn) {
-          btn.setAttribute('aria-expanded', expanded);
+        chipsEl.querySelectorAll('[data-tm-chip]').forEach(function(btn) {
+          var isCur = state.popoverOpen && btn.getAttribute('data-tm-chip') === state.activeTab;
+          btn.setAttribute('aria-expanded', isCur ? 'true' : 'false');
+          btn.classList.toggle('active', isCur);
         });
         var starSvg = chipsEl.querySelector('.tm-star');
         if (starSvg) starSvg.setAttribute('class', 'tm-star ' + starCls);
@@ -824,42 +1077,21 @@ export function buildInlineWidgetScript() {
       if (pop) {
         pop.classList.toggle('open', state.popoverOpen);
         if (state.popoverOpen) {
-          var qHtml = quotas.slice(0, 4).map(function(q) {
-            if (q.fiveHour && q.weekly) {
-              var worst = (q.fiveHour.pacing && q.fiveHour.pacing.status === 'burn') || (q.weekly.pacing && q.weekly.pacing.status === 'burn')
-                ? 'burn'
-                : (q.fiveHour.pacing && q.fiveHour.pacing.status === 'fast') || (q.weekly.pacing && q.weekly.pacing.status === 'fast')
-                  ? 'fast' : 'ok';
-              var paceLabel = worst === 'burn' ? t('paceBurn') : worst === 'fast' ? t('paceFast') : t('paceOk');
-              var pairHtml = escapeHtml(fmtPctNum(q.fiveHour.remainingFraction)) + '<span class="tm-slash">/</span>' + escapeHtml(fmtPctNum(q.weekly.remainingFraction));
-              return '<div class="tm-qitem"><div class="tm-qmeta"><span class="tm-qname" title="' + escapeHtml(q.title) + '">' + escapeHtml(q.title) +
-                '</span><span class="tm-qright"><span class="tm-pace-pill ' + worst + '">' + escapeHtml(paceLabel) + '</span><span class="tm-qpair" title="' + escapeHtml(t('quotaPairTip')) + '">' + pairHtml + '</span></span></div>' +
-                renderQuotaSubBar(t('quotaTag5h'), q.fiveHour.remainingFraction, q.fiveHour.resetTime, q.fiveHour.pacing) +
-                renderQuotaSubBar(t('quotaTagWeek'), q.weekly.remainingFraction, q.weekly.resetTime, q.weekly.pacing) +
-              '</div>';
-            }
-            var kind = resolveQuotaKind(q);
-            var tag = kind === '5h' ? t('quotaTag5h') : kind === 'week' ? t('quotaTagWeek') : '';
-            return '<div class="tm-qitem"><div class="tm-qmeta"><span class="tm-qname" title="' + escapeHtml(q.title) + '">' + escapeHtml(q.title) + '</span></div>' +
-              renderQuotaSubBar(tag || '·', q.remainingFraction, q.resetTime, q.pacing) + '</div>';
-          }).join('');
-
-          var subtitle = (conv && conv.model) || (snap && snap.conversationUnavailable ? t('convUnavailable') : snap && snap.connected ? t('connected') : t('offline'));
-          var heroNum = conv && conv.latestTps != null ? Number(conv.latestTps).toFixed(1) : (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--');
+          if (state.pointerInPop && state.lastRenderedTab === state.activeTab) {
+            positionPopover();
+            return;
+          }
+          state.lastRenderedTab = state.activeTab;
+          var card = buildFocusedPopoverModel(state.activeTab, snap, conv, usage, quotas);
           var styleNext = THEMES[(THEMES.indexOf(currentStyle()) + 1) % THEMES.length];
           var styleBtnText = currentStyle() === 'swiss' ? t('themeSwiss') : currentStyle() === 'glass' ? t('themeGlass') : t('themeMono');
           var isCopied = Date.now() < state.copiedUntil;
-          var ctxFoot = '';
-          if (conv && conv.context) {
-            ctxFoot = buildContextRingSvg(ctxFrac, 'pop') + escapeHtml(fmtTokens(conv.context.usedTokens) + ' / ' + fmtTokens(conv.context.maxTokens)) +
-              (conv.context.estimatedTurnsLeft ? ' · ' + escapeHtml(t('turnsLeft') + ' ' + conv.context.estimatedTurnsLeft + ' ' + t('turnsUnit')) : '');
-          }
 
-          pop.innerHTML =
+          var nextPopHtml =
             '<div class="tm-head">' +
               '<div class="tm-brand-row">' + buildSparkleIcon(starCls, true) +
-                '<span class="tm-model" title="' + escapeHtml(subtitle) + '">' + escapeHtml(subtitle) + '</span>' +
-                (isRunning ? '<span class="tm-status-tag">· ' + escapeHtml(t('generating')) + '</span>' : '') +
+                '<span class="tm-model" title="' + escapeHtml(card.title) + '">' + escapeHtml(card.title) + '</span>' +
+                (card.badge ? '<span class="tm-status-tag">' + escapeHtml(card.badge) + '</span>' : '') +
               '</div>' +
               '<div class="tm-head-acts">' +
                 '<button class="tm-btn" type="button" id="tm-style-btn" title="' + escapeHtml(t('themeLabel')) + '">' + escapeHtml(styleBtnText) + '</button>' +
@@ -867,59 +1099,48 @@ export function buildInlineWidgetScript() {
                 '<button class="tm-btn" type="button" id="tm-lang-btn">' + (prefs.language === 'en' ? '中' : 'EN') + '</button>' +
               '</div>' +
             '</div>' +
-            '<div class="tm-hero">' +
-              '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(heroNum) + '</span><span class="tm-hero-unit">' + escapeHtml(t('speedUnit')) + '</span></div>' +
-              '<div class="tm-hero-meta">' + escapeHtml(t('today')) + ' <b>' + escapeHtml(fmtTokens(usage && usage.todayTokens)) + '</b><br/>' + escapeHtml(t('month')) + ' <b>' + escapeHtml(fmtTokens(usage && usage.monthTokens)) + '</b></div>' +
-            '</div>' +
-            '<div class="tm-spark-wrap">' + buildSparklineSvg(conv && conv.sparkline) + '</div>' +
-            '<div class="tm-sub-strip">' +
-              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('sessionSpeed')) + '</div><div class="tm-sub-v">' + (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--') + '</div></div>' +
-              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('ttft')) + '</div><div class="tm-sub-v">' + (conv && conv.ttftSeconds != null ? Number(conv.ttftSeconds).toFixed(2) + 's' : '--') + '</div></div>' +
-              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('cacheHit')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtPct(cacheVal)) + '</div></div>' +
-            '</div>' +
-            buildTokenBreakdownHtml(conv) +
-            '<div class="tm-sec"><div class="tm-sec-title"><span>' + escapeHtml(t('usageOverview')) + '</span><span>' + safeInt(usage && usage.monthRequests) + ' ' + escapeHtml(t('requests')) + '</span></div>' +
-              '<div class="tm-usage-strip">' +
-                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('today')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.todayTokens)) + '</div></div>' +
-                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('week')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.weekTokens)) + '</div></div>' +
-                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('month')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.monthTokens)) + '</div></div>' +
-                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('lifetime')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.totalTokens)) + '</div></div>' +
-              '</div></div>' +
-            (qHtml ? '<div class="tm-sec"><div class="tm-sec-title"><span>' + escapeHtml(t('quotaTitle')) + '</span><span style="font-size:9.5px;">' + escapeHtml(t('paceLegend')) + '</span></div>' + qHtml + '</div>' : '') +
+            card.body +
             '<div class="tm-foot">' +
-              '<span class="tm-foot-ctx">' + ctxFoot + '</span>' +
+              '<span class="tm-foot-ctx" title="' + escapeHtml(card.footCtx || '') + '">' + escapeHtml(card.footCtx || '') + '</span>' +
               '<button class="tm-link" type="button" id="tm-open-modal">' + escapeHtml(t('openStats')) + '</button>' +
             '</div>';
 
-          var styleBtn = shadow.getElementById('tm-style-btn');
-          if (styleBtn) styleBtn.onclick = function(ev) {
-            if (!ev || ev.isTrusted !== true) return;
-            void updatePrefs({ theme: styleNext });
-          };
-          var copyBtn = shadow.getElementById('tm-copy-btn');
-          if (copyBtn) copyBtn.onclick = function(ev) {
-            if (!ev || ev.isTrusted !== true) return;
-            if (copyTextSafe(buildCopySummaryText())) {
-              state.copiedUntil = Date.now() + 1600;
+          if (state.lastPopHtml !== nextPopHtml || !pop.firstChild) {
+            state.lastPopHtml = nextPopHtml;
+            pop.innerHTML = nextPopHtml;
+
+            var styleBtn = shadow.getElementById('tm-style-btn');
+            if (styleBtn) styleBtn.onclick = function(ev) {
+              if (!ev || ev.isTrusted !== true) return;
+              void updatePrefs({ theme: styleNext });
+            };
+            var copyBtn = shadow.getElementById('tm-copy-btn');
+            if (copyBtn) copyBtn.onclick = function(ev) {
+              if (!ev || ev.isTrusted !== true) return;
+              if (copyTextSafe(buildCopySummaryText())) {
+                state.copiedUntil = Date.now() + 1600;
+                state.pointerInPop = false;
+                renderBar();
+                setTimeout(function() { if (!state.disposed) renderBar(); }, 1650);
+              }
+            };
+            var langBtn = shadow.getElementById('tm-lang-btn');
+            if (langBtn) langBtn.onclick = function(ev) {
+              if (!ev || ev.isTrusted !== true) return;
+              void updatePrefs({ language: state.prefs.language === 'en' ? 'zh-CN' : 'en' });
+            };
+            var openBtn = shadow.getElementById('tm-open-modal');
+            if (openBtn) openBtn.onclick = function(ev) {
+              if (!ev || ev.isTrusted !== true) return;
+              clearTimeout(state.hoverTimer);
+              state.pointerInPop = false;
+              state.popoverOpen = false;
+              state.pinned = false;
+              state.modalOpen = true;
               renderBar();
-              setTimeout(function() { if (!state.disposed) renderBar(); }, 1650);
-            }
-          };
-          var langBtn = shadow.getElementById('tm-lang-btn');
-          if (langBtn) langBtn.onclick = function(ev) {
-            if (!ev || ev.isTrusted !== true) return;
-            void updatePrefs({ language: state.prefs.language === 'en' ? 'zh-CN' : 'en' });
-          };
-          var openBtn = shadow.getElementById('tm-open-modal');
-          if (openBtn) openBtn.onclick = function(ev) {
-            if (!ev || ev.isTrusted !== true) return;
-            clearTimeout(state.hoverTimer);
-            state.popoverOpen = false;
-            state.pinned = false;
-            state.modalOpen = true;
-            renderBar();
-            renderModal();
-          };
+              renderModal();
+            };
+          }
           positionPopover();
         }
       }
@@ -1077,26 +1298,49 @@ export function buildInlineWidgetScript() {
           '<div class="tm-bar-wrap" id="tm-wrap"><div class="tm-chips" id="tm-chips"></div><div class="tm-popover" id="tm-popover"></div></div>';
 
         var wrap = shadow.getElementById('tm-wrap');
-        wrap.addEventListener('mouseenter', function() {
+        var chipsNode = shadow.getElementById('tm-chips');
+        var popNode = shadow.getElementById('tm-popover');
+        chipsNode.addEventListener('mouseover', function(e) {
+          var chip = e.target && e.target.closest ? e.target.closest('[data-tm-chip]') : null;
+          if (!chip) return;
           clearTimeout(state.hoverTimer);
-          state.popoverOpen = true;
-          renderBar();
+          if (state.pinned) return;
+          var tab = chip.getAttribute('data-tm-chip');
+          if (!state.popoverOpen || state.activeTab !== tab) {
+            state.activeTab = tab;
+            state.popoverOpen = true;
+            renderBar();
+          }
+        });
+        popNode.addEventListener('mouseenter', function() {
+          clearTimeout(state.hoverTimer);
+        });
+        popNode.addEventListener('pointerdown', function() {
+          state.pointerInPop = true;
         });
         wrap.addEventListener('mouseleave', function() {
           if (state.pinned) return;
           clearTimeout(state.hoverTimer);
           state.hoverTimer = setTimeout(function() {
             state.popoverOpen = false;
+            state.pointerInPop = false;
             renderBar();
-          }, 200);
+          }, 220);
         });
-        wrap.addEventListener('click', function(e) {
-          if (e.target && e.target.closest && e.target.closest('[data-tm-trigger]')) {
-            clearTimeout(state.hoverTimer);
-            state.pinned = !state.pinned;
-            state.popoverOpen = state.pinned;
-            renderBar();
+        chipsNode.addEventListener('click', function(e) {
+          var chip = e.target && e.target.closest ? e.target.closest('[data-tm-chip]') : null;
+          if (!chip) return;
+          clearTimeout(state.hoverTimer);
+          var tab = chip.getAttribute('data-tm-chip');
+          if (state.pinned && state.activeTab === tab) {
+            state.pinned = false;
+            state.popoverOpen = false;
+          } else {
+            state.activeTab = tab;
+            state.pinned = true;
+            state.popoverOpen = true;
           }
+          renderBar();
         });
       }
 
@@ -1153,6 +1397,7 @@ export function buildInlineWidgetScript() {
       if (!path.includes(hostEl)) {
         state.pinned = false;
         state.popoverOpen = false;
+        state.pointerInPop = false;
         renderBar();
       }
     }
@@ -1165,6 +1410,7 @@ export function buildInlineWidgetScript() {
         } else if (state.popoverOpen) {
           state.pinned = false;
           state.popoverOpen = false;
+          state.pointerInPop = false;
           renderBar();
         }
       }
@@ -1175,9 +1421,14 @@ export function buildInlineWidgetScript() {
       if (state.popoverOpen) positionPopover();
     }
 
+    function onPointerUp() {
+      state.pointerInPop = false;
+    }
+
     function dispose() {
       state.disposed = true;
       state.barLayoutKey = '';
+      state.pointerInPop = false;
       state.requestSeq++;
       clearInterval(pollTimer);
       clearTimeout(mountDebounce);
@@ -1185,6 +1436,7 @@ export function buildInlineWidgetScript() {
       try { observer && observer.disconnect(); } catch {}
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
       window.removeEventListener('resize', onViewportChange);
       window.removeEventListener('scroll', onViewportChange, true);
       if (hostEl) { hostEl.remove(); hostEl = null; shadow = null; }
@@ -1196,6 +1448,7 @@ export function buildInlineWidgetScript() {
     window.__agTokenMeterDispose = dispose;
     document.addEventListener('click', onDocClick, true);
     document.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('pointerup', onPointerUp, true);
     window.addEventListener('resize', onViewportChange);
     window.addEventListener('scroll', onViewportChange, true);
 

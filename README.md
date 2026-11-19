@@ -1,4 +1,4 @@
-# Antigravity TokenMeter (`v1.2.0`)
+# Antigravity TokenMeter (`v1.2.1`)
 
 > **开源协议：MIT License** · **零外部依赖（Node.js 标准库 + 原生前端）** · **不修改 `app.asar`**  
 > 为 Google Antigravity 桌面版打造的实时 Token 速率、Prompt Cache 保鲜度、无级上下文圆环、本月/历史用量总览与双周期（5h / 周）配额节奏监控插件。
@@ -8,6 +8,7 @@
 ## 核心特性
 
 - **原生融入聊天输入框底栏的透明状态条（可选实验内嵌）**：通过 CDP Isolated World（隔离世界）与 `closed` Shadow DOM 精准嵌入输入框底栏工具条（紧贴右侧权限按钮左侧齐平，窄屏自动优雅回落至输入框下方防挤压），全透明无边框、极细竖向发丝分隔，原地骨架复用更新不闪烁：
+  - **一格一卡、按需聚焦弹出**：悬停或点击底栏任意一格（速率 / 缓存命中 / 上下文 / 模型额度 / 今日用量 / 本月用量），仅在该格正上方弹出对应模块的精简卡片（如速率走势、缓存与 Token 构成、上下文容量条、双轨配额 Pace Tick、今日分模型分布、近 14 天每日柱状图），避免全量长弹窗遮挡视线；
   - **Gemini 标准内凹四角星（✦）**：按生成中 / 待机 / 离线自动切换克制微动效；
   - **0%–100% 无级连续跟进上下文圆环**：按真实浮点占比实时平滑推进与连续色阶渐变；
   - **极简双轨额度 `100/100`**：接入官方 `RetrieveUserQuotaSummary` 接口，左显 **5 小时额度**、右显 **周额度**（旧版自动无缝回退至 `GetUserStatus`）；
@@ -30,7 +31,7 @@
 
 ### Windows
 
-1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.2.0.zip` 并**完整解压**。
+1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.2.1.zip` 并**完整解压**。
 2. **先右键系统托盘中的 Antigravity 图标点击「退出」**（确保完全关闭，避免旧实例覆盖配置或吞掉启动参数）。
 3. 双击运行 **`一键安装插件(Windows双击运行).bat`**：
    - 自动部署插件与 `MIT LICENSE`；
@@ -90,7 +91,7 @@ node scripts/import_legacy_usage.mjs
 ## 开发者测试与只读预览
 
 ```bash
-# 运行全部 15 项单元测试
+# 运行全部 16 项单元测试
 node --test antigravity-token-meter/sidecars/meter/tests/*.test.mjs
 
 # 显式启动本地只读预览（自动生成一次性随机 Token）

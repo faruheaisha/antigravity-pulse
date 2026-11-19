@@ -553,7 +553,11 @@ export class UsageLedger {
     }
 
     let todayTokens = 0;
+    let todayInput = 0;
+    let todayCacheRead = 0;
+    let todayOutput = 0;
     let todayRequests = 0;
+    let todayByModel = [];
     let weekTokens = 0;
     let monthTokens = 0;
     let monthInput = 0;
@@ -567,7 +571,17 @@ export class UsageLedger {
       const t = safeInt(entry?.total);
       if (key === todayKey) {
         todayTokens = t;
+        todayInput = safeInt(entry?.input);
+        todayCacheRead = safeInt(entry?.cacheRead);
+        todayOutput = safeInt(entry?.output);
         todayRequests = safeInt(entry?.requests);
+        if (entry?.byModel && typeof entry.byModel === 'object') {
+          todayByModel = Object.entries(entry.byModel)
+            .map(([model, totalTokens]) => ({ model: String(model), totalTokens: safeInt(totalTokens) }))
+            .filter((x) => x.totalTokens > 0)
+            .sort((a, b) => b.totalTokens - a.totalTokens)
+            .slice(0, 6);
+        }
       }
       if (weekKeys.has(key)) weekTokens += t;
       if (key.startsWith(monthPrefix)) {
@@ -602,8 +616,13 @@ export class UsageLedger {
 
     return {
       todayDate: todayKey,
+      monthKey: monthPrefix,
       todayTokens,
+      todayInput,
+      todayCacheRead,
+      todayOutput,
       todayRequests,
+      todayByModel,
       weekTokens,
       monthTokens,
       monthInput,

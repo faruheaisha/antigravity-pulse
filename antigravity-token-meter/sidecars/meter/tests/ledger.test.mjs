@@ -27,6 +27,11 @@ test('UsageLedger 并发 ingest 不丢写、支持差值 upsert、防 __proto__ 
   const reloaded = new UsageLedger(file);
   const snap = await reloaded.snapshot(new Date(nowIso));
   assert.equal(snap.todayTokens, 3750);
+  assert.equal(snap.todayInput, 1100);
+  assert.equal(snap.todayCacheRead, 2000);
+  assert.equal(snap.todayOutput, 650);
+  assert.equal(snap.todayByModel[0].model, 'Gemini 4 Neon');
+  assert.equal(snap.todayByModel[0].totalTokens, 3600);
   assert.equal(snap.totalTokens, 3750);
   assert.equal(snap.todayRequests, 2);
   const neon = snap.modelRank.find((m) => m.model === 'Gemini 4 Neon');
