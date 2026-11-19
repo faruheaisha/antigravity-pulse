@@ -360,8 +360,13 @@ export function buildInlineWidgetScript() {
      */
     function computeBarLayout(enabledTabs, freeWidth) {
       if (!enabledTabs.length) return { density: 'full', shown: [], hidden: [] };
-      var fullW = { speed: 88, cache: 86, context: 86, quota: 80, today: 88, month: 78 };
-      var compactW = { speed: 56, cache: 56, context: 48, quota: 58, today: 58, month: 54 };
+      var isEn = state.prefs && state.prefs.language === 'en';
+      var fullW = isEn
+        ? { speed: 92, cache: 98, context: 96, quota: 92, today: 94, month: 92 }
+        : { speed: 88, cache: 86, context: 86, quota: 80, today: 88, month: 78 };
+      var compactW = isEn
+        ? { speed: 58, cache: 66, context: 48, quota: 58, today: 68, month: 62 }
+        : { speed: 56, cache: 56, context: 48, quota: 58, today: 58, month: 54 };
       var sepW = 5;
 
       var totalFull = enabledTabs.reduce(function(acc, k) { return acc + (fullW[k] || 76); }, 0) + Math.max(0, enabledTabs.length - 1) * sepW;
@@ -644,7 +649,10 @@ export function buildInlineWidgetScript() {
         var ctx = conv && conv.context;
         var ctxFrac = ctx ? ctx.usedFraction : null;
         var ctxPct = typeof ctxFrac === 'number' && Number.isFinite(ctxFrac) ? Math.round(Math.max(0, Math.min(1, ctxFrac)) * 100) : 0;
-        var turnsText = ctx && ctx.estimatedTurnsLeft ? (t('turnsLeft') + ' ' + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')) : '';
+        var isEnCtx = state.prefs && state.prefs.language === 'en';
+        var turnsText = ctx && ctx.estimatedTurnsLeft
+          ? (isEnCtx ? (t('turnsLeft') + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')) : (t('turnsLeft') + ' ' + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')))
+          : '';
         return {
           title: t('cardContext'),
           badge: '',
@@ -686,10 +694,10 @@ export function buildInlineWidgetScript() {
             renderQuotaSubBar(tag || '·', q.remainingFraction, q.resetTime, q.pacing) + '</div>';
         }).join('');
         return {
-          title: t('quotaTitle'),
+          title: t('cardQuota'),
           badge: '',
           footCtx: t('quotaPairTip'),
-          body: '<div class="tm-sec-title" style="margin-bottom:8px;"><span>' + escapeHtml(t('paceLegend')) + '</span><span>5h / ' + escapeHtml(t('quotaTagWeek')) + '</span></div>' +
+          body: '<div class="tm-sec-title" style="margin-bottom:8px;"><span>' + escapeHtml(t('paceLegend')) + '</span><span>' + escapeHtml(t('quotaTag5h')) + ' / ' + escapeHtml(t('quotaTagWeek')) + '</span></div>' +
             (qHtml || '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>'),
         };
       }
@@ -971,7 +979,7 @@ export function buildInlineWidgetScript() {
         .tm-slash { color: var(--tm-faint); margin: 0 1.5px; font-weight: 400; }
         .tm-unit { color: var(--tm-faint); font-size: 10.5px; margin-left: -2px; }
 
-        .tm-popover { position: fixed; z-index: 2147483600; width: min(308px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); backdrop-filter: var(--tm-blur); -webkit-backdrop-filter: var(--tm-blur); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow); padding: 13px 14px 11px; box-sizing: border-box; display: none; }
+        .tm-popover { position: fixed; z-index: 2147483600; width: min(320px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); backdrop-filter: var(--tm-blur); -webkit-backdrop-filter: var(--tm-blur); border: 1px solid var(--tm-border); border-radius: var(--tm-radius); box-shadow: var(--tm-shadow); padding: 13px 14px 11px; box-sizing: border-box; display: none; }
         .tm-popover.open { display: block; }
         .tm-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 10px; }
         .tm-brand-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -1046,7 +1054,7 @@ export function buildInlineWidgetScript() {
         .tm-pace-pill.burn { color: var(--tm-danger); }
         .tm-qpair { font-family: var(--tm-mono); font-size: 11px; font-weight: 600; color: var(--tm-text); }
         .tm-qsub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 10.5px; }
-        .tm-qtag { width: 22px; flex-shrink: 0; font-size: 10px; color: var(--tm-muted); font-family: var(--tm-mono); }
+        .tm-qtag { min-width: 24px; flex-shrink: 0; font-size: 10px; color: var(--tm-muted); font-family: var(--tm-mono); white-space: nowrap; }
         .tm-qtrack { position: relative; flex: 1; height: 9px; display: flex; align-items: center; }
         .tm-qbar { width: 100%; height: 3.5px; border-radius: 99px; background: var(--tm-elev); overflow: hidden; }
         .tm-qfill { height: 100%; border-radius: 99px; background: var(--tm-ink-bar); }
@@ -1611,6 +1619,10 @@ export function buildInlineWidgetScript() {
         .tm-mbadge { font-size: 11px; font-weight: 500; color: var(--tm-muted); background: var(--tm-z-surface); padding: 3px 10px; border-radius: 99px; }
 
         .tm-z-kpis { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--tm-z-surface); border-radius: 14px; padding: 15px 6px; margin-bottom: 14px; }
+        @media (max-width: 580px) {
+          .tm-z-kpis { grid-template-columns: repeat(2, 1fr); gap: 10px 4px; }
+          .tm-z-kpi { border-left: none; }
+        }
         .tm-z-kpi { text-align: center; padding: 2px 8px; border-left: 1px solid var(--tm-hairline); min-width: 0; }
         .tm-z-kpi:first-child { border-left: none; }
         .tm-z-kpi-v { font-size: 18px; font-weight: 650; letter-spacing: -0.025em; font-variant-numeric: tabular-nums; color: var(--tm-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1696,7 +1708,7 @@ export function buildInlineWidgetScript() {
       var vh = vv ? vv.height : window.innerHeight;
       var anchorEl = shadow.querySelector('[data-tm-chip="' + state.activeTab + '"]') || hostEl;
       var rect = anchorEl.getBoundingClientRect();
-      var pw = pop.offsetWidth || 308;
+      var pw = pop.offsetWidth || 320;
       var ph = pop.offsetHeight || 220;
       var centeredLeft = rect.left + rect.width / 2 - pw / 2;
       var left = Math.max(10, Math.min(vw - pw - 10, centeredLeft));
@@ -1848,7 +1860,7 @@ export function buildInlineWidgetScript() {
               '</div>' +
               '<div class="tm-head-acts">' +
                 '<button class="tm-btn" type="button" id="tm-style-btn" title="' + escapeHtml(t('themeLabel')) + '">' + escapeHtml(styleBtnText) + '</button>' +
-                '<button class="tm-btn" type="button" id="tm-copy-btn">' + escapeHtml(isCopied ? t('copied') : t('copyStats')) + '</button>' +
+                '<button class="tm-btn" type="button" id="tm-copy-btn">' + escapeHtml(isCopied ? t('copied') : t('copyShort')) + '</button>' +
                 '<button class="tm-btn" type="button" id="tm-lang-btn">' + (prefs.language === 'en' ? '中' : 'EN') + '</button>' +
               '</div>' +
             '</div>' +
@@ -1865,6 +1877,7 @@ export function buildInlineWidgetScript() {
             var styleBtn = shadow.getElementById('tm-style-btn');
             if (styleBtn) styleBtn.onclick = function(ev) {
               if (!ev || ev.isTrusted !== true) return;
+              state.pointerInPop = false;
               void updatePrefs({ theme: styleNext });
             };
             var copyBtn = shadow.getElementById('tm-copy-btn');
@@ -1880,6 +1893,7 @@ export function buildInlineWidgetScript() {
             var langBtn = shadow.getElementById('tm-lang-btn');
             if (langBtn) langBtn.onclick = function(ev) {
               if (!ev || ev.isTrusted !== true) return;
+              state.pointerInPop = false;
               void updatePrefs({ language: state.prefs.language === 'en' ? 'zh-CN' : 'en' });
             };
             var openBtn = shadow.getElementById('tm-open-modal');
@@ -1996,8 +2010,8 @@ export function buildInlineWidgetScript() {
               '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + escapeHtml(fmtStatsTokens(usage.totalTokens)) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiTotalTokens')) + '</div></div>' +
               '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + escapeHtml(fmtStatsTokens(usage.monthTokens)) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiMonthTokens')) + '</div></div>' +
               '<div class="tm-z-kpi" title="' + escapeHtml(peakDate) + '"><div class="tm-z-kpi-v">' + escapeHtml(fmtStatsTokens(peakVal)) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiPeakTokens')) + '</div></div>' +
-              '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + curStreak + ' ' + escapeHtml(t('daysUnit')) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiCurrentStreak')) + '</div></div>' +
-              '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + maxStreak + ' ' + escapeHtml(t('daysUnit')) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiLongestStreak')) + '</div></div>' +
+              '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + (state.prefs.language === 'en' ? (curStreak + t('daysUnit')) : (curStreak + ' ' + t('daysUnit'))) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiCurrentStreak')) + '</div></div>' +
+              '<div class="tm-z-kpi"><div class="tm-z-kpi-v">' + (state.prefs.language === 'en' ? (maxStreak + t('daysUnit')) : (maxStreak + ' ' + t('daysUnit'))) + '</div><div class="tm-z-kpi-k">' + escapeHtml(t('kpiLongestStreak')) + '</div></div>' +
             '</div>' +
             '<div class="tm-z-card">' +
               '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('tokenActivity')) + '</span><div class="tm-z-seg">' + actSeg + '</div></div>' +
@@ -2038,8 +2052,8 @@ export function buildInlineWidgetScript() {
         if (!ev || ev.isTrusted !== true) return;
         if (copyTextSafe(buildCopySummaryText())) {
           state.copiedUntil = Date.now() + 1600;
-          renderModal();
-          setTimeout(function() { if (!state.disposed && state.modalOpen) renderModal(); }, 1650);
+          renderModal(true);
+          setTimeout(function() { if (!state.disposed && state.modalOpen) renderModal(true); }, 1650);
         }
       };
       modalShadow.getElementById('tm-backdrop').onclick = function(e) {
@@ -2173,7 +2187,7 @@ export function buildInlineWidgetScript() {
           for (var s = 0; s < tm.seriesList.length; s++) {
             var ser = tm.seriesList[s];
             var v = ser.values[idx] || 0;
-            if (v > 0) {
+            if (v > 0 && tm.seriesCoords[s] && tm.seriesCoords[s][idx]) {
               daySum += v;
               var pt = tm.seriesCoords[s][idx];
               activeList.push({ label: ser.label, color: ser.color, val: v });
@@ -2254,6 +2268,7 @@ export function buildInlineWidgetScript() {
     }
 
     async function updatePrefs(patch) {
+      state.pointerInPop = false;
       try {
         if (window.__agTokenMeterApi) {
           var next = await window.__agTokenMeterApi.setPrefs(patch);
@@ -2265,7 +2280,7 @@ export function buildInlineWidgetScript() {
       } catch {}
       ensureMounted();
       renderBar();
-      if (state.modalOpen) renderModal();
+      if (state.modalOpen) renderModal(true);
     }
 
     function ensureMounted() {

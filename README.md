@@ -1,4 +1,4 @@
-# Antigravity TokenMeter (`v1.2.4`)
+# Antigravity TokenMeter (`v1.2.5`)
 
 > **开源协议：MIT License** · **零外部依赖（Node.js 标准库 + 原生前端）** · **不修改 `app.asar`**  
 > 为 Google Antigravity 桌面版打造的实时 Token 速率、Prompt Cache 保鲜度、无级上下文圆环、本月/历史用量总览与双周期（5h / 周）配额节奏监控插件。
@@ -31,7 +31,7 @@
 
 ### Windows
 
-1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.2.4.zip` 并**完整解压**。
+1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.2.5.zip` 并**完整解压**。
 2. **先右键系统托盘中的 Antigravity 图标点击「退出」**（确保完全关闭，避免旧实例覆盖配置或吞掉启动参数）。
 3. 双击运行 **`一键安装插件(Windows双击运行).bat`**：
    - 自动部署插件与 `MIT LICENSE`；
@@ -91,7 +91,7 @@ node scripts/import_legacy_usage.mjs
 ## 开发者测试与只读预览
 
 ```bash
-# 运行全部 16 项单元测试
+# 运行全部 17 项单元测试
 node --test antigravity-token-meter/sidecars/meter/tests/*.test.mjs
 
 # 显式启动本地只读预览（自动生成一次性随机 Token）

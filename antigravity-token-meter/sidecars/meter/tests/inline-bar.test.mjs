@@ -223,7 +223,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.4',
+    version: '1.2.5',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -317,12 +317,12 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
   const pop = shadow.getElementById('tm-popover');
 
   const expectByChip = {
-    speed: { must: ['生成速率', '134.4', '会话加权均速'], forbid: ['账号模型额度', '今日模型分布', '近 14 天趋势'] },
-    cache: { must: ['缓存与输入构成', '87%', '未缓存输入'], forbid: ['会话加权均速', '账号模型额度', '近 14 天趋势'] },
-    context: { must: ['上下文窗口', '33%', '约余 9 轮'], forbid: ['会话加权均速', '账号模型额度', '今日模型分布'] },
-    quota: { must: ['账号模型额度', 'Gemini Models', '竖线为时间基准'], forbid: ['会话加权均速', '上下文空间充裕', '近 14 天趋势'] },
-    today: { must: ['今日消耗', '288.80M', '今日模型分布'], forbid: ['账号模型额度', '近 14 天趋势', '会话加权均速'] },
-    month: { must: ['本月消耗', '2.68B', '近 14 天趋势'], forbid: ['账号模型额度', '今日模型分布', '会话加权均速'] },
+    speed: { must: ['生成速率', '134.4', '会话均速'], forbid: ['模型额度', '今日模型分布', '近 14 天趋势'] },
+    cache: { must: ['缓存效率', '87%', '未缓存输入'], forbid: ['会话均速', '模型额度', '近 14 天趋势'] },
+    context: { must: ['上下文窗口', '33%', '约余 9 轮'], forbid: ['会话均速', '模型额度', '今日模型分布'] },
+    quota: { must: ['模型额度', 'Gemini Models', '竖线为时间基准'], forbid: ['会话均速', '上下文空间充裕', '近 14 天趋势'] },
+    today: { must: ['今日消耗', '288.80M', '今日模型分布'], forbid: ['模型额度', '近 14 天趋势', '会话均速'] },
+    month: { must: ['本月消耗', '2.68B', '近 14 天趋势'], forbid: ['模型额度', '今日模型分布', '会话均速'] },
   };
 
   for (const [chipKey, rule] of Object.entries(expectByChip)) {
@@ -379,6 +379,105 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
   assert.ok(moreChip, 'narrow split should display +N overflow chip');
   moreChip.dispatchEvent({ type: 'mouseover' });
   assert.ok(pop.innerHTML.includes('更多指标'));
+
+  win.__agTokenMeterDispose();
+});
+
+test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无多余空格且底栏宽窄自适应', async (t) => {
+  const snapshot = {
+    version: '1.2.5',
+    connected: true,
+    preferences: {
+      language: 'en',
+      theme: 'swiss',
+      showSpeed: true,
+      showCache: true,
+      showContext: true,
+      showQuota: true,
+      showToday: true,
+      showMonth: true,
+      version: 2,
+    },
+    conversation: {
+      model: 'Gemini 4 Neon',
+      running: false,
+      latestTps: 142.0,
+      tps: 138.5,
+      ttftSeconds: 1.9,
+      streamingSeconds: 20.5,
+      measuredRequests: 10,
+      requests: 10,
+      cacheHitRate: 0.89,
+      thinkingRatio: 0.15,
+      lastRequestTime: new Date().toISOString(),
+      tokens: { total: 1000000, inputAll: 950000, uncachedInput: 100000, cacheRead: 850000, output: 50000, responseOutput: 40000, thinkingOutput: 10000 },
+      context: { usedTokens: 150000, maxTokens: 512000, remainingTokens: 362000, usedFraction: 0.293, estimatedTurnsLeft: 9 },
+      sparkline: [{ tps: 130 }, { tps: 142 }],
+    },
+    quotas: [
+      {
+        title: 'Gemini Models',
+        fiveHour: { remainingFraction: 0.95, resetTime: new Date(Date.now() + 3600000).toISOString(), pacing: { timeRemainingFraction: 0.8, status: 'ok' } },
+        weekly: { remainingFraction: 0.91, resetTime: new Date(Date.now() + 5 * 86400000).toISOString(), pacing: { timeRemainingFraction: 0.75, status: 'ok' } },
+      },
+    ],
+    quotaPair: { title: 'Gemini Models', fiveHourFraction: 0.95, weeklyFraction: 0.91 },
+    usage: {
+      todayDate: '2026-11-20',
+      monthKey: '2026-11',
+      todayTokens: 6760000,
+      todayInput: 500000,
+      todayCacheRead: 6000000,
+      todayOutput: 260000,
+      todayRequests: 40,
+      todayByModel: [{ model: 'Gemini 4 Neon', totalTokens: 6760000 }],
+      weekTokens: 847000000,
+      monthTokens: 2710000000,
+      monthInput: 240000000,
+      monthCacheRead: 2410000000,
+      monthOutput: 60000000,
+      monthRequests: 20500,
+      activeDays: 48,
+      totalRequests: 28100,
+      peakDay: { date: '2026-11-14', total: 445000000 },
+      currentStreak: 27,
+      longestStreak: 27,
+      totalTokens: 3400000000,
+      days: [{ date: '2026-11-20', total: 6760000 }],
+      modelRank: [{ model: 'Gemini 4 Neon', totalTokens: 3400000000, outputTokens: 60000000, avgTps: 142.0, requests: 28100 }],
+    },
+  };
+
+  const { doc, win } = createDomEnv(snapshot);
+  t.after(() => { try { win.__agTokenMeterDispose?.(); } catch {} });
+  const code = buildInlineWidgetScript();
+  const fn = new Function('window', 'document', 'location', 'getComputedStyle', 'MutationObserver', 'ResizeObserver', code);
+  fn(
+    win,
+    doc,
+    win.location,
+    () => ({ display: 'flex', visibility: 'visible', opacity: '1', flexDirection: 'row', backgroundColor: '#ffffff' }),
+    class { observe() {} disconnect() {} },
+    class { observe() {} disconnect() {} }
+  );
+  await new Promise((r) => setTimeout(r, 30));
+
+  const host = doc.querySelector('#ag-token-meter-host');
+  const shadow = host.shadowRootMock;
+  const pop = shadow.getElementById('tm-popover');
+
+  // 英文 Quota 卡片必须使用等宽短标 5h/7d，严禁出现溢出碰撞进度条的 "Weekly"
+  shadow.querySelector('[data-tm-chip="quota"]').dispatchEvent({ type: 'mouseover' });
+  assert.ok(pop.innerHTML.includes('>7d<'));
+  assert.equal(pop.innerHTML.includes('>Weekly<'), false);
+  assert.ok(pop.innerHTML.includes('Model Quotas'));
+  assert.ok(pop.innerHTML.includes('Left 5h · Right 7d'));
+  assert.ok(pop.innerHTML.includes('>Copy<'));
+
+  // 英文 Context 卡片必须输出紧凑无多余空格的 "~9 turns left"
+  shadow.querySelector('[data-tm-chip="context"]').dispatchEvent({ type: 'mouseover' });
+  assert.ok(pop.innerHTML.includes('~9 turns left'));
+  assert.equal(pop.innerHTML.includes('~ 9 turns left'), false);
 
   win.__agTokenMeterDispose();
 });
