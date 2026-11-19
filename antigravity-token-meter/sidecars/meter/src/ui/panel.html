@@ -7,90 +7,213 @@
   <title>TokenMeter</title>
   <style>
     :root {
-      --bg: #f8fafc;
+      --bg: #fafafa;
       --card: #ffffff;
-      --border: #e2e8f0;
-      --text: #0f172a;
-      --muted: #64748b;
-      --accent: #0284c7;
-      --accent-soft: rgba(2, 132, 199, 0.12);
-      --ok-bg: #ecfdf5;
-      --ok-fg: #065f46;
+      --elev: #f4f4f5;
+      --border: rgba(24, 24, 27, 0.10);
+      --hairline: rgba(24, 24, 27, 0.075);
+      --ring-track: rgba(24, 24, 27, 0.13);
+      --text: #18181b;
+      --sub: #52525b;
+      --muted: #71717a;
+      --faint: #a1a1aa;
+      --accent: #2563eb;
+      --ink-bar: #18181b;
+      --warn: #d97706;
+      --danger: #dc2626;
+      --ok-dot: #16a34a;
       --warn-bg: #fffbeb;
       --warn-fg: #92400e;
+      --mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Consolas", monospace;
+      --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --radius: 10px;
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #0f141c;
-        --card: #161d27;
-        --border: rgba(248, 250, 252, 0.1);
-        --text: #e2e8f0;
-        --muted: #94a3b8;
-        --accent: #38bdf8;
-        --accent-soft: rgba(56, 189, 248, 0.15);
-        --ok-bg: rgba(16, 185, 129, 0.14);
-        --ok-fg: #6ee7b7;
-        --warn-bg: rgba(245, 158, 11, 0.14);
+        --bg: #0c0c0e;
+        --card: #121214;
+        --elev: #1c1c20;
+        --border: rgba(255, 255, 255, 0.09);
+        --hairline: rgba(255, 255, 255, 0.065);
+        --ring-track: rgba(255, 255, 255, 0.15);
+        --text: #f4f4f5;
+        --sub: #a1a1aa;
+        --muted: #8a8a93;
+        --faint: #52525b;
+        --accent: #60a5fa;
+        --ink-bar: #e4e4e7;
+        --warn: #f59e0b;
+        --danger: #ef4444;
+        --ok-dot: #22c55e;
+        --warn-bg: rgba(245, 158, 11, 0.10);
         --warn-fg: #fcd34d;
       }
     }
+    html[data-style="glass"] {
+      --bg: linear-gradient(155deg, #eef2f6 0%, #f8fafc 100%);
+      --card: rgba(255, 255, 255, 0.72);
+      --border: rgba(24, 24, 27, 0.09);
+      --radius: 13px;
+    }
+    @media (prefers-color-scheme: dark) {
+      html[data-style="glass"] {
+        --bg: linear-gradient(155deg, #111318 0%, #0b0c10 100%);
+        --card: rgba(28, 28, 34, 0.72);
+        --border: rgba(255, 255, 255, 0.13);
+      }
+    }
+    html[data-style="mono"] {
+      --font: var(--mono);
+      --bg: #eef2ee;
+      --card: #f6f8f6;
+      --elev: #e6ece6;
+      --border: rgba(16, 32, 24, 0.16);
+      --hairline: rgba(16, 32, 24, 0.09);
+      --accent: #059669;
+      --ink-bar: #059669;
+      --radius: 5px;
+    }
+    @media (prefers-color-scheme: dark) {
+      html[data-style="mono"] {
+        --bg: #080b09;
+        --card: #0c100e;
+        --elev: #151d19;
+        --border: rgba(16, 185, 129, 0.22);
+        --hairline: rgba(16, 185, 129, 0.11);
+        --text: #e6f4ec;
+        --sub: #9eb7a9;
+        --muted: #6f8a7c;
+        --faint: #465d51;
+        --accent: #10b981;
+        --ink-bar: #10b981;
+      }
+    }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 14px; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 13px; }
+    body {
+      margin: 0;
+      padding: 14px;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12.5px;
+      -webkit-font-smoothing: antialiased;
+    }
     .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 8px; }
-    .brand { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .brand { font-size: 14px; font-weight: 650; display: flex; align-items: center; gap: 7px; letter-spacing: -0.015em; }
+    .brand-star { width: 16px; height: 16px; flex-shrink: 0; }
+    .brand-star .s-main { fill: var(--text); }
+    .brand-star .s-sub { fill: var(--accent); }
+    .ver { font-family: var(--mono); font-size: 10.5px; color: var(--faint); font-weight: 400; }
     .actions { display: flex; gap: 6px; }
-    button { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
-    button:hover { border-color: var(--accent); color: var(--accent); }
-    .banner { padding: 10px 12px; border-radius: 10px; font-size: 12px; line-height: 1.5; margin-bottom: 12px; border: 1px solid var(--border); }
-    .banner.ok { background: var(--ok-bg); color: var(--ok-fg); }
+    button { border: 1px solid var(--border); background: var(--card); color: var(--sub); border-radius: 6px; padding: 3px 9px; font-size: 11.5px; font-weight: 500; cursor: pointer; transition: border-color .14s, color .14s; }
+    button:hover { border-color: var(--text); color: var(--text); }
+
+    .banner { padding: 8px 11px; border-radius: 8px; font-size: 11.5px; line-height: 1.5; margin-bottom: 12px; border: 1px solid var(--border); background: var(--card); color: var(--sub); display: flex; align-items: center; gap: 7px; }
+    .banner.ok::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--ok-dot); flex-shrink: 0; }
     .banner.warn { background: var(--warn-bg); color: var(--warn-fg); }
-    .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
-    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
-    .kpi-label { font-size: 11px; color: var(--muted); }
-    .kpi-val { font-size: 18px; font-weight: 700; margin-top: 3px; font-variant-numeric: tabular-nums; }
-    .sec-title { font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; }
-    .q-item { margin-bottom: 8px; }
-    .q-meta { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; gap: 6px; }
-    .q-bar { height: 6px; border-radius: 99px; background: var(--border); overflow: hidden; }
-    .q-fill { height: 100%; background: var(--accent); border-radius: 99px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
-    th { color: var(--muted); font-size: 11px; }
-    .toggles { display: flex; flex-wrap: wrap; gap: 10px; }
-    .toggles label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
+
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 13px 14px; margin-bottom: 10px; backdrop-filter: blur(18px); }
+    .hero-top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+    .hero-speed { display: inline-flex; align-items: baseline; gap: 4px; }
+    .hero-num { font-size: 28px; font-weight: 650; letter-spacing: -0.035em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .hero-unit { font-size: 11px; color: var(--muted); font-weight: 500; }
+    .model-tag { font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 165px; }
+    .spark-box { color: var(--text); margin: 4px 0 10px; }
+
+    .strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--hairline); padding-top: 9px; }
+    .strip-cell { padding: 0 9px; border-left: 1px solid var(--hairline); }
+    .strip-cell:first-child { padding-left: 0; border-left: none; }
+    .kpi-label { font-size: 10.5px; color: var(--muted); margin-bottom: 2px; }
+    .kpi-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+    .kpi-ctx-row { display: inline-flex; align-items: center; gap: 5px; }
+    .ctx-ring { width: 14px; height: 14px; display: block; flex-shrink: 0; }
+    .ctx-ring-val { transition: stroke-dashoffset .45s cubic-bezier(0.22, 1, 0.36, 1), stroke .45s ease, stroke-opacity .25s ease; }
+
+    .sec-title { font-size: 11px; font-weight: 500; color: var(--muted); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .q-item { margin-bottom: 9px; }
+    .q-item:last-child { margin-bottom: 0; }
+    .q-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; margin-bottom: 4px; gap: 6px; }
+    .q-name { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .q-pair { font-family: var(--mono); font-size: 11.5px; font-weight: 600; color: var(--text); flex-shrink: 0; }
+    .q-slash { color: var(--faint); margin: 0 1.5px; font-weight: 400; }
+    .q-sub { display: flex; align-items: center; gap: 7px; margin-top: 4px; font-size: 11px; }
+    .q-tag { width: 24px; flex-shrink: 0; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+    .q-track { position: relative; flex: 1; height: 9px; display: flex; align-items: center; }
+    .q-bar { width: 100%; height: 3.5px; border-radius: 99px; background: var(--elev); overflow: hidden; }
+    .q-fill { height: 100%; background: var(--ink-bar); border-radius: 99px; }
+    .q-fill.warn { background: var(--warn); }
+    .q-fill.danger { background: var(--danger); }
+    .q-tick { position: absolute; top: 0; bottom: 0; width: 1.5px; background: var(--text); opacity: 0.58; border-radius: 1px; transform: translateX(-50%); }
+    .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 7px; padding: 2px; gap: 2px; background: var(--elev); margin-top: 8px; }
+    .seg button { border: none; background: transparent; padding: 3px 9px; border-radius: 5px; font-size: 11px; color: var(--muted); }
+    .seg button.active { background: var(--card); color: var(--text); font-weight: 600; }
+    .q-sub-val { font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; min-width: 82px; text-align: right; display: inline-flex; justify-content: flex-end; gap: 6px; }
+    .q-sub-val b { color: var(--text); font-weight: 500; }
+    .q-sub-val em { font-style: normal; color: var(--faint); }
+
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    th, td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+    th { color: var(--muted); font-size: 10.5px; font-weight: 500; }
+    td:not(:first-child) { font-family: var(--mono); font-size: 11px; }
+    .toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+    .pill { display: inline-flex; align-items: center; gap: 5px; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-size: 11.5px; cursor: pointer; transition: all .14s; }
+    .pill input { display: none; }
+    .pill-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+    .pill.on { border-color: var(--text); color: var(--text); background: var(--elev); font-weight: 500; }
+    .pill.on .pill-dot { background: var(--accent); }
   </style>
 </head>
 <body>
   <div class="head">
-    <div class="brand">⚡ <span data-k="brand">TokenMeter</span> <span id="ver" style="font-size:11px;color:var(--muted);font-weight:500;"></span></div>
+    <div class="brand">
+      <svg class="brand-star" viewBox="0 0 24 24" aria-hidden="true">
+        <path class="s-main" d="M10.5 2.5 C11.4 8.3 13.7 10.6 19.5 11.5 C13.7 12.4 11.4 14.7 10.5 20.5 C9.6 14.7 7.3 12.4 1.5 11.5 C7.3 10.6 9.6 8.3 10.5 2.5 Z"/>
+        <path class="s-sub" d="M19 2.2 C19.4 4.3 20.2 5.1 22.3 5.5 C20.2 5.9 19.4 6.7 19 8.8 C18.6 6.7 17.8 5.9 15.7 5.5 C17.8 5.1 18.6 4.3 19 2.2 Z"/>
+      </svg>
+      <span data-k="brand">TokenMeter</span>
+      <span id="ver" class="ver"></span>
+    </div>
     <div class="actions">
       <button id="lang-btn" type="button">EN</button>
       <button id="refresh-btn" type="button">刷新</button>
     </div>
   </div>
+
   <div id="diag-banner" class="banner warn"></div>
-  <div class="grid">
-    <div class="card" style="margin:0"><div class="kpi-label" data-k="latestSpeed"></div><div class="kpi-val" id="k-latest">--</div></div>
-    <div class="card" style="margin:0"><div class="kpi-label" data-k="sessionSpeed"></div><div class="kpi-val" id="k-session">--</div></div>
-    <div class="card" style="margin:0"><div class="kpi-label" data-k="cacheHit"></div><div class="kpi-val" id="k-cache">--</div></div>
-    <div class="card" style="margin:0"><div class="kpi-label" data-k="context"></div><div class="kpi-val" id="k-ctx">--</div></div>
-  </div>
+
   <div class="card">
-    <div class="sec-title"><span data-k="sparklineTitle"></span><span id="model-name"></span></div>
-    <div id="sparkline"></div>
+    <div class="hero-top">
+      <div class="hero-speed">
+        <span class="hero-num" id="k-latest">--</span>
+        <span class="hero-unit" data-k="speedUnit">tok/s</span>
+      </div>
+      <span class="model-tag" id="model-name"></span>
+    </div>
+    <div class="spark-box" id="sparkline"></div>
+    <div class="strip">
+      <div class="strip-cell"><div class="kpi-label" data-k="sessionSpeed"></div><div class="kpi-val" id="k-session">--</div></div>
+      <div class="strip-cell"><div class="kpi-label" data-k="cacheHit"></div><div class="kpi-val" id="k-cache">--</div></div>
+      <div class="strip-cell"><div class="kpi-label" data-k="context"></div><div class="kpi-val kpi-ctx-row"><span id="k-ctx-ring"></span><span id="k-ctx">--</span></div></div>
+    </div>
   </div>
+
   <div class="card">
-    <div class="sec-title"><span data-k="quotaTitle"></span></div>
+    <div class="sec-title"><span data-k="quotaTitle"></span><span id="quota-legend" style="font-family:var(--mono);font-size:10px;"></span></div>
     <div id="quotas"></div>
   </div>
+
   <div class="card">
-    <div class="sec-title"><span data-k="modelRankTitle"></span><span id="today-sum"></span></div>
+    <div class="sec-title"><span data-k="modelRankTitle"></span><span id="today-sum" style="font-family:var(--mono);font-size:10.5px;"></span></div>
     <table><thead><tr><th data-k="colModel"></th><th data-k="colTotal"></th><th data-k="colAvgTps"></th><th data-k="colReq"></th></tr></thead><tbody id="rank-body"></tbody></table>
   </div>
+
   <div class="card">
     <div class="sec-title"><span data-k="customizeTitle"></span></div>
     <div class="toggles" id="toggles"></div>
+    <div class="seg" id="theme-seg"></div>
   </div>
+
   <script src="./i18n.js"></script>
   <script src="./panel.js"></script>
 </body>

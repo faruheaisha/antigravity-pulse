@@ -59,10 +59,234 @@ export function parseTokenCount(value) {
 }
 
 /**
- * 将 GetUserStatus 立即投影为最小脱敏 DTO（不保留邮箱、头像、账单等原始字段）。
- * @param {any} userStatus
+ * 根据重置时间推导配额周期类型（仅用于展示标签：5 小时滚动窗口或周窗口）。
+ * @param {string | null} resetTime
+ * @param {number} [nowMs]
+ * @returns {'5h' | 'week' | null}
  */
-export function projectUserStatus(userStatus) {
+export function inferQuotaWindowKind(resetTime, nowMs = Date.now()) {
+  if (!resetTime || typeof resetTime !== 'string') return null;
+  const ts = Date.parse(resetTime);
+  if (!Number.isFinite(ts)) return null;
+  const deltaMs = ts - nowMs;
+  if (deltaMs <= 0) return null;
+  // 5 小时滚动窗口（宽容 30 分钟时钟偏差）
+  if (deltaMs <= 5.5 * 3600 * 1000) return '5h';
+  // 周限额窗口（5.5 小时以上至 8 天内）
+  if (deltaMs <= 8 * 86400 * 1000) return 'week';
+  return null;
+}
+
+/**
+ * 综合桶元数据标签与重置时间，判断单个配额桶属于 5h 窗口还是周窗口。
+ * @param {any} bucket
+ * @param {number} [nowMs]
+ * @returns {'5h' | 'week' | null}
+ */
+export function classifyQuotaBucket(bucket, nowMs = Date.now()) {
+  if (!bucket || typeof bucket !== 'object') return null;
+  const hint = [
+    bucket.window,
+    bucket.refreshWindowLabel,
+    bucket.displayName,
+    bucket.bucketId,
+    bucket.description,
+  ]
+    .filter((v) => typeof v === 'string' && v.trim())
+    .join(' ')
+    .toLowerCase();
+
+  if (/(?:^|[^a-z0-9])(5\s*h|5[\s_-]*hour|five[\s_-]*hour)|5\s*小时/.test(hint)) {
+    return '5h';
+  }
+  if (/(?:^|[^a-z0-9])(week|weekly|7\s*d|7[\s_-]*day)|每周|周额度|周限额/.test(hint)) {
+    return 'week';
+  }
+  return inferQuotaWindowKind(bucket.resetTime, nowMs);
+}
+
+/**
+ * 计算配额消耗节奏：对比当前剩余额度与窗口剩余时间比例，产出刻度线位置与节奏状态。
+ * @param {number} remainingFraction
+ * @param {string | null} resetTime
+ * @param {'5h' | 'week' | null} windowKind
+ * @param {number} [nowMs]
+ */
+export function computeQuotaPacing(remainingFraction, resetTime, windowKind, nowMs = Date.now()) {
+  if (typeof remainingFraction !== 'number' || !Number.isFinite(remainingFraction)) return null;
+  if (windowKind !== '5h' && windowKind !== 'week') return null;
+  if (!resetTime || typeof resetTime !== 'string') return null;
+  const ts = Date.parse(resetTime);
+  if (!Number.isFinite(ts)) return null;
+  const deltaMs = ts - nowMs;
+  if (deltaMs <= 0) return null;
+
+  const windowMs = windowKind === '5h' ? 5 * 3600 * 1000 : 7 * 86400 * 1000;
+  const timeRemainingFraction = Math.max(0, Math.min(1, deltaMs / windowMs));
+  const rem = Math.max(0, Math.min(1, remainingFraction));
+  const delta = rem - timeRemainingFraction;
+  const status = delta >= -0.08 ? 'ok' : delta >= -0.22 ? 'fast' : 'burn';
+  return {
+    timeRemainingFraction: Number(timeRemainingFraction.toFixed(4)),
+    delta: Number(delta.toFixed(4)),
+    status,
+  };
+}
+
+function normalizeBucketEntry(bucket, nowMs) {
+  if (!bucket || typeof bucket !== 'object' || bucket.disabled === true) return null;
+  if (typeof bucket.remainingFraction !== 'number' || !Number.isFinite(bucket.remainingFraction)) return null;
+  const frac = Math.max(0, Math.min(1, bucket.remainingFraction));
+  const resetTime = typeof bucket.resetTime === 'string' && Number.isFinite(Date.parse(bucket.resetTime)) ? bucket.resetTime : null;
+  const kind = classifyQuotaBucket(bucket, nowMs);
+  return {
+    remainingFraction: frac,
+    resetTime,
+    windowKind: kind,
+    pacing: computeQuotaPacing(frac, resetTime, kind, nowMs),
+    label: typeof bucket.displayName === 'string' ? bucket.displayName.trim().slice(0, 120) : '',
+  };
+}
+
+/**
+ * 解析 RetrieveUserQuotaSummaryResponse 响应为脱敏分组列表（含 5h 与周额度双轨）。
+ * @param {any} rawSummary
+ * @param {number} [nowMs]
+ */
+export function projectQuotaSummary(rawSummary, nowMs = Date.now()) {
+  const body = rawSummary?.response && typeof rawSummary.response === 'object' ? rawSummary.response : rawSummary;
+  if (!body || typeof body !== 'object') return [];
+
+  const groupsInput = Array.isArray(body.groups) ? body.groups.slice(0, 50) : [];
+  const projected = [];
+
+  for (const grp of groupsInput) {
+    if (!grp || typeof grp !== 'object') continue;
+    const rawBuckets = Array.isArray(grp.buckets) ? grp.buckets.slice(0, 20) : [];
+    const entries = rawBuckets.map((b) => normalizeBucketEntry(b, nowMs)).filter(Boolean);
+    if (entries.length === 0) continue;
+
+    let fiveHour = null;
+    let weekly = null;
+    for (const e of entries) {
+      if (e.windowKind === '5h') {
+        if (!fiveHour || e.remainingFraction < fiveHour.remainingFraction) {
+          fiveHour = { remainingFraction: e.remainingFraction, resetTime: e.resetTime, pacing: e.pacing };
+        }
+      } else if (e.windowKind === 'week') {
+        if (!weekly || e.remainingFraction < weekly.remainingFraction) {
+          weekly = { remainingFraction: e.remainingFraction, resetTime: e.resetTime, pacing: e.pacing };
+        }
+      }
+    }
+
+    const title = (typeof grp.displayName === 'string' && grp.displayName.trim().slice(0, 120)) || entries[0].label || 'Quota';
+    const leadEntry = entries.reduce((min, cur) => (cur.remainingFraction < min.remainingFraction ? cur : min), entries[0]);
+    projected.push({
+      title,
+      leadModel: title,
+      modelCount: 1,
+      models: [title],
+      remainingFraction: leadEntry.remainingFraction,
+      resetTime: leadEntry.resetTime,
+      windowKind: leadEntry.windowKind,
+      pacing: leadEntry.pacing,
+      fiveHour,
+      weekly,
+    });
+  }
+
+  // 若顶层 buckets 有数据且 groups 为空，合并成默认分组
+  if (projected.length === 0 && Array.isArray(body.buckets) && body.buckets.length > 0) {
+    const entries = body.buckets.slice(0, 20).map((b) => normalizeBucketEntry(b, nowMs)).filter(Boolean);
+    if (entries.length > 0) {
+      let fiveHour = null;
+      let weekly = null;
+      for (const e of entries) {
+        if (e.windowKind === '5h') {
+          if (!fiveHour || e.remainingFraction < fiveHour.remainingFraction) {
+            fiveHour = { remainingFraction: e.remainingFraction, resetTime: e.resetTime, pacing: e.pacing };
+          }
+        } else if (e.windowKind === 'week') {
+          if (!weekly || e.remainingFraction < weekly.remainingFraction) {
+            weekly = { remainingFraction: e.remainingFraction, resetTime: e.resetTime, pacing: e.pacing };
+          }
+        }
+      }
+      const leadEntry = entries.reduce((min, cur) => (cur.remainingFraction < min.remainingFraction ? cur : min), entries[0]);
+      projected.push({
+        title: leadEntry.label || 'Model Quota',
+        leadModel: leadEntry.label || 'Model Quota',
+        modelCount: 1,
+        models: [leadEntry.label || 'Model Quota'],
+        remainingFraction: leadEntry.remainingFraction,
+        resetTime: leadEntry.resetTime,
+        windowKind: leadEntry.windowKind,
+        pacing: leadEntry.pacing,
+        fiveHour,
+        weekly,
+      });
+    }
+  }
+
+  return projected;
+}
+
+/**
+ * 为底部状态条挑选「5小时额度 / 周额度」双值摘要（优先匹配当前会话模型所在分组）。
+ * @param {Array<any>} quotas
+ * @param {string | null} [activeModel]
+ */
+export function selectQuotaPair(quotas, activeModel = null) {
+  if (!Array.isArray(quotas) || quotas.length === 0) return null;
+
+  let chosen = null;
+  if (typeof activeModel === 'string' && activeModel.trim()) {
+    const needle = activeModel.trim().toLowerCase().replace(/\s*\([^)]*\)$/, '');
+    chosen = quotas.find((q) => {
+      const hay = [q.title, q.leadModel, ...(Array.isArray(q.models) ? q.models : [])]
+        .filter((s) => typeof s === 'string')
+        .join(' ')
+        .toLowerCase();
+      return needle && hay.includes(needle);
+    }) || null;
+  }
+
+  // 优先选同时有 5h 与周额度的分组，其次按最紧迫的组回退
+  if (!chosen) {
+    chosen = quotas.find((q) => q.fiveHour && q.weekly) || quotas[0];
+  }
+
+  let fiveHour = chosen.fiveHour || (chosen.windowKind === '5h' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
+  let weekly = chosen.weekly || (chosen.windowKind === 'week' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
+
+  // 若选定组只有一侧，尝试在其余分组补齐缺失侧
+  if (!fiveHour) {
+    const fGrp = quotas.find((q) => q.fiveHour || q.windowKind === '5h');
+    if (fGrp) fiveHour = fGrp.fiveHour || { remainingFraction: fGrp.remainingFraction, resetTime: fGrp.resetTime };
+  }
+  if (!weekly) {
+    const wGrp = quotas.find((q) => q.weekly || q.windowKind === 'week');
+    if (wGrp) weekly = wGrp.weekly || { remainingFraction: wGrp.remainingFraction, resetTime: wGrp.resetTime };
+  }
+
+  return {
+    title: chosen.title || '',
+    fiveHourFraction: fiveHour ? fiveHour.remainingFraction : null,
+    fiveHourResetTime: fiveHour ? fiveHour.resetTime : null,
+    weeklyFraction: weekly ? weekly.remainingFraction : null,
+    weeklyResetTime: weekly ? weekly.resetTime : null,
+    fallbackFraction: chosen.remainingFraction,
+  };
+}
+
+/**
+ * 将 GetUserStatus 与可选 RetrieveUserQuotaSummary 立即投影为最小脱敏 DTO（不保留邮箱、头像、账单等原始字段）。
+ * @param {any} userStatus
+ * @param {number} [nowMs]
+ * @param {any} [quotaSummary]
+ */
+export function projectUserStatus(userStatus, nowMs = Date.now(), quotaSummary = null) {
   const labelMap = new Map();
   const rawQuotas = [];
   const configs = userStatus?.cascadeModelConfigData?.clientModelConfigs;
@@ -82,7 +306,13 @@ export function projectUserStatus(userStatus) {
     }
   }
 
-  // 将具有相同 resetTime 与相同剩余比例（精确到千分位）的模型聚合展示，标注为展示分组
+  // 若 RetrieveUserQuotaSummary 可用，优先使用官方 5h / 周额度分桶摘要
+  const summaryQuotas = projectQuotaSummary(quotaSummary, nowMs);
+  if (summaryQuotas.length > 0) {
+    return { labelMap, quotas: summaryQuotas };
+  }
+
+  // 否则回退到 GetUserStatus 的 clientModelConfigs.quotaInfo 聚合
   const grouped = new Map();
   for (const item of rawQuotas) {
     const key = `${item.resetTime || 'none'}|${Math.round(item.remainingFraction * 1000)}`;
@@ -101,6 +331,8 @@ export function projectUserStatus(userStatus) {
     .map((g) => {
       const lead = g.models[0] || 'Model';
       const title = g.models.length > 1 ? `${lead.replace(/\s*\([^)]*\)$/, '')} (+${g.models.length - 1})` : lead;
+      const kind = inferQuotaWindowKind(g.resetTime, nowMs);
+      const pacing = computeQuotaPacing(g.remainingFraction, g.resetTime, kind, nowMs);
       return {
         title,
         leadModel: lead,
@@ -108,6 +340,10 @@ export function projectUserStatus(userStatus) {
         models: g.models.slice(0, 12),
         remainingFraction: g.remainingFraction,
         resetTime: g.resetTime,
+        windowKind: kind,
+        pacing,
+        fiveHour: kind === '5h' ? { remainingFraction: g.remainingFraction, resetTime: g.resetTime, pacing } : null,
+        weekly: kind === 'week' ? { remainingFraction: g.remainingFraction, resetTime: g.resetTime, pacing } : null,
       };
     })
     .sort((a, b) => a.remainingFraction - b.remainingFraction);
@@ -271,6 +507,8 @@ export function computeConversationTelemetry({
 
   let latestSample = null;
   let latestModel = null;
+  let lastRequestMs = 0;
+  let lastRequestTime = null;
   const sparkline = [];
   const ledgerEvents = [];
 
@@ -282,6 +520,11 @@ export function computeConversationTelemetry({
     totalResponseOutput += item.responseOutputTokens;
     totalThinkingOutput += item.thinkingTokens;
     latestModel = item.model;
+    const itemMs = Date.parse(item.timestamp);
+    if (Number.isFinite(itemMs) && itemMs >= lastRequestMs) {
+      lastRequestMs = itemMs;
+      lastRequestTime = item.timestamp;
+    }
 
     let reliableTps = null;
     if (item.streamingSeconds !== null && item.streamingSeconds > 0 && item.outputTokens > 0) {
@@ -324,12 +567,21 @@ export function computeConversationTelemetry({
   const totalTokens = totalInputAll + totalOutput;
   const cacheHitRate = totalInputAll > 0 ? totalCacheRead / totalInputAll : null;
   const sessionTps = weightedStreamingSec > 0 ? weightedOutput / weightedStreamingSec : null;
+  const thinkingRatio = totalOutput > 0 ? Number((totalThinkingOutput / totalOutput).toFixed(4)) : null;
+
+  let enrichedContext = latestContext;
+  if (latestContext && deduped.size >= 2) {
+    const avgTurnDelta = (totalUncachedInput + totalOutput) / deduped.size;
+    const estTurns = avgTurnDelta >= 200 ? Math.max(1, Math.min(999, Math.floor(latestContext.remainingTokens / avgTurnDelta))) : null;
+    enrichedContext = { ...latestContext, estimatedTurnsLeft: estTurns };
+  }
 
   return {
     cascadeId,
     status: String(status || ''),
     running: status === 'CASCADE_RUN_STATUS_RUNNING',
     model: latestSample?.model || latestModel,
+    lastRequestTime,
     requests: ledgerEvents.length,
     measuredRequests,
     excludedOutliers,
@@ -338,6 +590,7 @@ export function computeConversationTelemetry({
     ttftSeconds: latestSample ? latestSample.ttft : null,
     streamingSeconds: Number(weightedStreamingSec.toFixed(2)),
     cacheHitRate: cacheHitRate !== null ? Number(cacheHitRate.toFixed(4)) : null,
+    thinkingRatio,
     tokens: {
       total: totalTokens,
       inputAll: totalInputAll,
@@ -348,7 +601,7 @@ export function computeConversationTelemetry({
       responseOutput: totalResponseOutput,
       thinkingOutput: totalThinkingOutput,
     },
-    context: latestContext,
+    context: enrichedContext,
     sparkline: sparkline.slice(-16),
     ledgerEvents,
   };

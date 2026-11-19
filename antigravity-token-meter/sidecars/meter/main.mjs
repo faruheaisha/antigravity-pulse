@@ -19,7 +19,7 @@ import { randomBytes } from 'node:crypto';
 import { resolvePaths, readPluginFlags } from './src/paths.mjs';
 import { OwnerLease } from './src/owner-lock.mjs';
 import { LanguageServerClient } from './src/ls-client.mjs';
-import { projectUserStatus, computeConversationTelemetry } from './src/telemetry.mjs';
+import { projectUserStatus, selectQuotaPair, computeConversationTelemetry } from './src/telemetry.mjs';
 import { UsageLedger } from './src/ledger.mjs';
 import { PreferencesStore } from './src/prefs.mjs';
 import { CdpInlineBridge } from './src/cdp-bridge.mjs';
@@ -28,7 +28,7 @@ import { buildInlineWidgetScript } from './src/ui/inline-bar.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
-const VERSION = String(PKG.version || '1.0.0');
+const VERSION = String(PKG.version || '1.1.0');
 const IS_HOST_SIDECAR = Boolean(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT);
 const IS_PREVIEW = process.argv.includes('--preview');
 
@@ -66,9 +66,12 @@ async function fetchUserStatusProjection() {
 
   userStatusInflight = (async () => {
     try {
-      const res = await lsClient.getUserStatus();
-      if (res?.userStatus) {
-        userStatusProjection = projectUserStatus(res.userStatus);
+      const [statusRes, summaryRes] = await Promise.all([
+        lsClient.getUserStatus(),
+        lsClient.retrieveUserQuotaSummary(false).catch(() => null),
+      ]);
+      if (statusRes?.userStatus || summaryRes) {
+        userStatusProjection = projectUserStatus(statusRes?.userStatus || null, Date.now(), summaryRes);
         userStatusFetchedAt = Date.now();
         return { projection: userStatusProjection, fresh: true };
       }
@@ -165,6 +168,7 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
 
   const usage = await ledger.snapshot();
   const preferences = await prefsStore.get();
+  const quotaPair = selectQuotaPair(quotas, conversation?.model || null);
 
   return {
     version: VERSION,
@@ -172,6 +176,7 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
     conversationUnavailable,
     conversation,
     quotas,
+    quotaPair,
     usage,
     preferences,
     integration: bridge.status,

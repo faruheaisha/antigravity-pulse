@@ -11,8 +11,9 @@
   }
 
   const DICT = window.__AG_TM_I18N__ || { 'zh-CN': { diag: {} }, en: { diag: {} } };
+  const THEMES = ['swiss', 'glass', 'mono'];
   let lang = 'zh-CN';
-  let prefs = { language: 'zh-CN', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, version: 0 };
+  let prefs = { language: 'zh-CN', theme: 'swiss', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, version: 0 };
   let confirmedVersion = 0;
   let reqSeq = 0;
 
@@ -31,15 +32,84 @@
   }
   function fmtPct(f) { return typeof f === 'number' && Number.isFinite(f) ? Math.round(Math.max(0, Math.min(1, f)) * 100) + '%' : '--'; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function fmtCountdown(iso) {
+    if (!iso) return '--';
+    const ms = Date.parse(iso) - Date.now();
+    if (!Number.isFinite(ms)) return '--';
+    if (ms <= 0) return '0m';
+    const mins = Math.floor(ms / 60000);
+    const hrs = Math.floor(mins / 60);
+    const days = Math.floor(hrs / 24);
+    if (days > 0) return `${days}d ${hrs % 24}h`;
+    if (hrs > 0) return `${hrs}h ${mins % 60}m`;
+    return `${mins}m`;
+  }
+
+  /* 0%–100% 无级跟进上下文圆环（低饱和高级连续色阶） */
+  const CTX_RING_R = 5.6;
+  const CTX_RING_CIRC = 2 * Math.PI * CTX_RING_R;
+  const CTX_COLOR_STOPS = [
+    [0.0, 59, 130, 246],
+    [0.48, 37, 99, 235],
+    [0.72, 217, 119, 6],
+    [0.90, 220, 38, 38],
+    [1.0, 185, 28, 28],
+  ];
+
+  function interpCtxColor(frac) {
+    const f = Math.max(0, Math.min(1, Number(frac) || 0));
+    for (let i = 0; i < CTX_COLOR_STOPS.length - 1; i++) {
+      const a = CTX_COLOR_STOPS[i];
+      const b = CTX_COLOR_STOPS[i + 1];
+      if (f <= b[0]) {
+        const k = (f - a[0]) / Math.max(1e-6, b[0] - a[0]);
+        return `rgb(${Math.round(a[1] + (b[1] - a[1]) * k)},${Math.round(a[2] + (b[2] - a[2]) * k)},${Math.round(a[3] + (b[3] - a[3]) * k)})`;
+      }
+    }
+    return 'rgb(185,28,28)';
+  }
+
+  function syncContextRing(container, frac) {
+    if (!container) return;
+    const hasVal = typeof frac === 'number' && Number.isFinite(frac);
+    const clamped = hasVal ? Math.max(0, Math.min(1, frac)) : 0;
+    const dashOffset = CTX_RING_CIRC * (1 - clamped);
+    const stroke = interpCtxColor(clamped);
+
+    if (!container.querySelector('.ctx-ring')) {
+      container.innerHTML =
+        `<svg class="ctx-ring" viewBox="0 0 16 16" aria-hidden="true">` +
+          `<circle cx="8" cy="8" r="${CTX_RING_R}" fill="none" stroke="var(--ring-track)" stroke-width="1.85"/>` +
+          `<circle class="ctx-ring-val" cx="8" cy="8" r="${CTX_RING_R}" fill="none" stroke="${stroke}" stroke-width="1.85" stroke-linecap="round" stroke-dasharray="${CTX_RING_CIRC.toFixed(3)}" stroke-dashoffset="${dashOffset.toFixed(3)}" stroke-opacity="${clamped > 0 ? '1' : '0'}" transform="rotate(-90 8 8)"/>` +
+        `</svg>`;
+      return;
+    }
+    const arc = container.querySelector('.ctx-ring-val');
+    if (arc) {
+      arc.setAttribute('stroke-dashoffset', dashOffset.toFixed(3));
+      arc.setAttribute('stroke-opacity', clamped > 0 ? '1' : '0');
+      arc.setAttribute('stroke', stroke);
+    }
+  }
 
   function renderSpark(points) {
-    if (!Array.isArray(points) || points.length < 2) return '<div style="color:var(--muted);font-size:12px;">' + esc(t('noData')) + '</div>';
-    const w = 320, h = 54, pad = 5;
+    if (!Array.isArray(points) || points.length < 2) return '<div style="color:var(--faint);font-size:11.5px;padding:10px 0;text-align:center;">' + esc(t('noData')) + '</div>';
+    const w = 310, h = 48, padX = 3, padY = 6;
     const vals = points.map((p) => { const v = Number(p && p.tps); return Number.isFinite(v) && v >= 0 ? v : 0; });
     const min = Math.min(...vals), max = Math.max(...vals), span = Math.max(1, max - min);
-    const coords = vals.map((v, i) => `${(pad + (i / (vals.length - 1)) * (w - pad * 2)).toFixed(1)},${(h - pad - ((v - min) / span) * (h - pad * 2)).toFixed(1)}`);
-    const area = `${pad},${h - pad} ${coords.join(' ')} ${w - pad},${h - pad}`;
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}"><polygon points="${area}" fill="var(--accent-soft)"/><polyline points="${coords.join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const pts = vals.map((v, i) => [
+      padX + (i / (vals.length - 1)) * (w - padX * 2),
+      h - padY - ((v - min) / span) * (h - padY * 2),
+    ]);
+    const coords = pts.map((p) => `${p[0].toFixed(1)},${p[1].toFixed(1)}`);
+    const area = `${padX},${h - 2} ${coords.join(' ')} ${w - padX},${h - 2}`;
+    const last = pts[pts.length - 1];
+    const midY = (h / 2).toFixed(1);
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" style="display:block;overflow:visible">` +
+      `<defs><linearGradient id="p-sp-area" x1="0" y1="0" x2="0" y2="${h}" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="currentColor" stop-opacity="0.10"/><stop offset="100%" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>` +
+      `<line x1="0" y1="${midY}" x2="${w}" y2="${midY}" stroke="var(--hairline)" stroke-dasharray="2 3"/>` +
+      `<polygon points="${area}" fill="url(#p-sp-area)"/><polyline points="${coords.join(' ')}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+      `<circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2.7" fill="var(--accent)" stroke="var(--card)" stroke-width="1.5"/></svg>`;
   }
 
   async function apiGet(path) {
@@ -64,7 +134,10 @@
       ['showContext', t('optContext')], ['showQuota', t('optQuota')], ['showToday', t('optToday')],
     ];
     const box = document.getElementById('toggles');
-    box.innerHTML = items.map(([k, label]) => `<label><input type="checkbox" data-k="${esc(k)}" ${prefs[k] ? 'checked' : ''}/>${esc(label)}</label>`).join('');
+    box.innerHTML = items.map(([k, label]) => {
+      const on = Boolean(prefs[k]);
+      return `<label class="pill ${on ? 'on' : ''}"><input type="checkbox" data-k="${esc(k)}" ${on ? 'checked' : ''}/><span class="pill-dot"></span>${esc(label)}</label>`;
+    }).join('');
     box.querySelectorAll('input').forEach((inp) => {
       inp.onchange = async () => {
         try {
@@ -81,11 +154,50 @@
     });
   }
 
+  function renderThemeSeg() {
+    const cur = THEMES.includes(prefs.theme) ? prefs.theme : 'swiss';
+    document.documentElement.setAttribute('data-style', cur);
+    const seg = document.getElementById('theme-seg');
+    if (!seg) return;
+    const list = [
+      ['swiss', t('themeSwiss')],
+      ['glass', t('themeGlass')],
+      ['mono', t('themeMono')],
+    ];
+    seg.innerHTML = list.map(([id, lbl]) => `<button type="button" class="${cur === id ? 'active' : ''}" data-th="${id}">${esc(lbl)}</button>`).join('');
+    seg.querySelectorAll('button').forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          const next = await apiPost('./api/preferences', { theme: btn.dataset.th });
+          if (next && !next.error) {
+            prefs = next;
+            confirmedVersion = Math.max(confirmedVersion, safeInt(next.version));
+            renderThemeSeg();
+          }
+        } catch {}
+      };
+    });
+  }
+
   function applyStaticLabels() {
     document.documentElement.lang = lang;
     document.querySelectorAll('[data-k]').forEach((el) => { el.textContent = t(el.dataset.k); });
     document.getElementById('lang-btn').textContent = lang === 'en' ? '中文' : 'EN';
     document.getElementById('refresh-btn').textContent = t('refresh');
+    document.getElementById('quota-legend').textContent = t('paceLegend');
+    renderThemeSeg();
+  }
+
+  function renderSubBar(tag, frac, resetIso, pacing) {
+    const pct = Math.round(Math.max(0, Math.min(1, Number(frac) || 0)) * 100);
+    const status = pacing && pacing.status;
+    const cls = (pct <= 15 || status === 'burn') ? 'danger' : (pct <= 35 || status === 'fast') ? 'warn' : '';
+    let tick = '';
+    if (pacing && typeof pacing.timeRemainingFraction === 'number' && Number.isFinite(pacing.timeRemainingFraction)) {
+      const pos = Math.max(2, Math.min(98, Math.round(pacing.timeRemainingFraction * 100)));
+      tick = `<span class="q-tick" style="left:${pos}%" title="${esc(t('paceLegend'))}"></span>`;
+    }
+    return `<div class="q-sub"><span class="q-tag">${esc(tag)}</span><div class="q-track"><div class="q-bar"><div class="q-fill ${cls}" style="width:${pct}%"></div></div>${tick}</div><span class="q-sub-val"><b>${pct}%</b><em>${esc(fmtCountdown(resetIso))}</em></span></div>`;
   }
 
   async function refresh() {
@@ -108,26 +220,42 @@
       const banner = document.getElementById('diag-banner');
       const ok = diag.state === 'mounted' || diag.state === 'waiting_composer';
       banner.className = 'banner ' + (ok ? 'ok' : 'warn');
-      banner.textContent = (ok ? '● ' : '⚠ ') + tDiag(diag.code || diag.state);
+      banner.textContent = (ok ? '' : '⚠ ') + tDiag(diag.code || diag.state);
 
       const c = data.conversation || {};
-      document.getElementById('k-latest').textContent = c.latestTps != null ? `${Number(c.latestTps).toFixed(1)} ${t('speedUnit')}` : '--';
-      document.getElementById('k-session').textContent = c.tps != null ? `${Number(c.tps).toFixed(1)} ${t('speedUnit')}` : '--';
+      const heroSpeed = c.latestTps != null ? Number(c.latestTps).toFixed(1) : (c.tps != null ? Number(c.tps).toFixed(1) : '--');
+      document.getElementById('k-latest').textContent = heroSpeed;
+      document.getElementById('k-session').textContent = c.tps != null ? `${Number(c.tps).toFixed(1)}` : '--';
       document.getElementById('k-cache').textContent = fmtPct(c.cacheHitRate);
-      document.getElementById('k-ctx').textContent = c.context ? fmtPct(c.context.usedFraction) : '--';
+      const ctxFrac = c.context ? c.context.usedFraction : null;
+      syncContextRing(document.getElementById('k-ctx-ring'), ctxFrac);
+      document.getElementById('k-ctx').textContent = c.context ? fmtPct(ctxFrac) : '--';
       document.getElementById('model-name').textContent = c.model || (data.conversationUnavailable ? t('convUnavailable') : '');
       document.getElementById('sparkline').innerHTML = renderSpark(c.sparkline);
 
       const quotas = data.quotas || [];
       document.getElementById('quotas').innerHTML = quotas.length
         ? quotas.map((item) => {
-            const pct = Math.round(Math.max(0, Math.min(1, Number(item.remainingFraction) || 0)) * 100);
-            return `<div class="q-item"><div class="q-meta"><span>${esc(item.title)}</span><span>${pct}%</span></div><div class="q-bar"><div class="q-fill" style="width:${pct}%"></div></div></div>`;
+            if (item.fiveHour && item.weekly) {
+              const p5 = Math.round(Math.max(0, Math.min(1, Number(item.fiveHour.remainingFraction) || 0)) * 100);
+              const pw = Math.round(Math.max(0, Math.min(1, Number(item.weekly.remainingFraction) || 0)) * 100);
+              return `<div class="q-item"><div class="q-meta"><span class="q-name">${esc(item.title)}</span><span class="q-pair" title="${esc(t('quotaPairTip'))}">${p5}<span class="q-slash">/</span>${pw}</span></div>` +
+                renderSubBar(t('quotaTag5h'), item.fiveHour.remainingFraction, item.fiveHour.resetTime, item.fiveHour.pacing) +
+                renderSubBar(t('quotaTagWeek'), item.weekly.remainingFraction, item.weekly.resetTime, item.weekly.pacing) +
+              `</div>`;
+            }
+            let kind = item.windowKind === '5h' || item.windowKind === 'week' ? item.windowKind : null;
+            if (!kind && item.resetTime) {
+              const ms = Date.parse(item.resetTime) - Date.now();
+              if (Number.isFinite(ms) && ms > 0) kind = ms <= 5.5 * 3600000 ? '5h' : ms <= 8 * 86400000 ? 'week' : null;
+            }
+            const tag = kind ? (kind === '5h' ? t('quotaTag5h') : t('quotaTagWeek')) : '·';
+            return `<div class="q-item"><div class="q-meta"><span class="q-name">${esc(item.title)}</span></div>${renderSubBar(tag, item.remainingFraction, item.resetTime, item.pacing)}</div>`;
           }).join('')
-        : `<div style="color:var(--muted);font-size:12px;">${esc(t('noData'))}</div>`;
+        : `<div style="color:var(--faint);font-size:11.5px;">${esc(t('noData'))}</div>`;
 
       const usage = data.usage || {};
-      document.getElementById('today-sum').textContent = `${t('today')}: ${fmtTokens(usage.todayTokens)}`;
+      document.getElementById('today-sum').textContent = `${t('today')} ${fmtTokens(usage.todayTokens)}`;
       const ranks = usage.modelRank || [];
       const tbody = document.getElementById('rank-body');
       tbody.textContent = '';
@@ -135,7 +263,7 @@
         const tr = document.createElement('tr');
         const td = document.createElement('td');
         td.colSpan = 4;
-        td.style.color = 'var(--muted)';
+        td.style.color = 'var(--faint)';
         td.style.textAlign = 'center';
         td.textContent = t('noData');
         tr.appendChild(td);

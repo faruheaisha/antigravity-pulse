@@ -135,6 +135,7 @@ if [[ ! -f "$CFG_DIR/preferences.json" ]]; then
   cat > "$CFG_DIR/preferences.json" <<'EOF'
 {
   "language": "zh-CN",
+  "theme": "swiss",
   "showSpeed": true,
   "showCache": true,
   "showContext": true,
@@ -171,5 +172,5 @@ EOF
 fi
 
 echo ""
-echo "[完成] Antigravity TokenMeter v1.0.0 已安装至: $DST_PLUGIN"
+echo "[完成] Antigravity TokenMeter v1.1.0 已安装至: $DST_PLUGIN"
 echo "已在 config.json 中同时启用插件与 sidecar。"

@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 
 export const DEFAULT_PREFS = Object.freeze({
   language: 'zh-CN',
+  theme: 'swiss',
   showSpeed: true,
   showCache: true,
   showContext: true,
@@ -16,6 +17,7 @@ export const DEFAULT_PREFS = Object.freeze({
 });
 
 const ALLOWED_LANGS = new Set(['zh-CN', 'en']);
+const ALLOWED_THEMES = new Set(['swiss', 'glass', 'mono']);
 const BOOL_KEYS = ['showSpeed', 'showCache', 'showContext', 'showQuota', 'showToday'];
 
 export function sanitizePrefsPatch(input) {
@@ -27,6 +29,9 @@ export function sanitizePrefsPatch(input) {
     if (k === 'language') {
       if (!ALLOWED_LANGS.has(v)) throw new Error('unsupported_language');
       patch.language = v;
+    } else if (k === 'theme') {
+      if (!ALLOWED_THEMES.has(v)) throw new Error('unsupported_theme');
+      patch.theme = v;
     } else if (BOOL_KEYS.includes(k)) {
       if (typeof v !== 'boolean') throw new Error('invalid_boolean_pref');
       patch[k] = v;
@@ -57,6 +62,7 @@ export class PreferencesStore {
       const parsed = JSON.parse(raw.replace(/^\uFEFF/, ''));
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         if (ALLOWED_LANGS.has(parsed.language)) data.language = parsed.language;
+        if (ALLOWED_THEMES.has(parsed.theme)) data.theme = parsed.theme;
         for (const k of BOOL_KEYS) {
           if (typeof parsed[k] === 'boolean') data[k] = parsed[k];
         }

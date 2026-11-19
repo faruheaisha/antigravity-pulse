@@ -215,6 +215,10 @@ export class LanguageServerClient {
     return this.call('GetUserStatus', { metadata: { ideName: 'antigravity' } });
   }
 
+  retrieveUserQuotaSummary(forceRefresh = false) {
+    return this.call('RetrieveUserQuotaSummary', { request: {}, forceRefresh: Boolean(forceRefresh) });
+  }
+
   getAllTrajectories() {
     return this.call('GetAllCascadeTrajectories', {});
   }

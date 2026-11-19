@@ -1,8 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <rect x="4" y="4" width="56" height="56" rx="14" fill="#0F172A"/>
-  <path d="M16 42 A18 18 0 1 1 48 42" stroke="#334155" stroke-width="5" stroke-linecap="round"/>
-  <path d="M16 42 A18 18 0 0 1 45 24" stroke="#38BDF8" stroke-width="5" stroke-linecap="round"/>
-  <path d="M32 36 L44 22" stroke="#F8FAFC" stroke-width="3.5" stroke-linecap="round"/>
-  <circle cx="32" cy="36" r="4.5" fill="#38BDF8"/>
-  <path d="M22 48 H42" stroke="#64748B" stroke-width="3" stroke-linecap="round"/>
+  <rect x="4" y="4" width="56" height="56" rx="14" fill="#111113"/>
+  <rect x="4.75" y="4.75" width="54.5" height="54.5" rx="13.25" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="1.5"/>
+  <!-- 极简精密刻度弧 -->
+  <path d="M16.5 45.5 A20 20 0 1 1 47.5 45.5" stroke="#FFFFFF" stroke-opacity="0.18" stroke-width="2" stroke-linecap="round"/>
+  <path d="M16.5 45.5 A20 20 0 0 1 43.5 15.5" stroke="#3B82F6" stroke-width="2.2" stroke-linecap="round"/>
+  <!-- 利落单色 Gemini 内凹四角星主星 -->
+  <path d="M32 14 C33.2 24.8 39.2 30.8 50 32 C39.2 33.2 33.2 39.2 32 50 C30.8 39.2 24.8 33.2 14 32 C24.8 30.8 30.8 24.8 32 14 Z" fill="#FAFAFA"/>
+  <!-- 右上克制小伴星 -->
+  <path d="M46.5 14 C46.9 16.6 48.4 18.1 51 18.5 C48.4 18.9 46.9 20.4 46.5 23 C46.1 20.4 44.6 18.9 42 18.5 C44.6 18.1 46.1 16.6 46.5 14 Z" fill="#3B82F6"/>
 </svg>

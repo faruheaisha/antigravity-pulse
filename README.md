@@ -1,17 +1,24 @@
-# Antigravity TokenMeter (`v1.0.0`)
+# Antigravity TokenMeter (`v1.1.0`)
 
 > **开源协议：MIT License** · **零外部依赖（Node.js 标准库 + 原生前端）** · **不修改 `app.asar`**  
-> 为 Google Antigravity 桌面版打造的实时 Token 输出速率、思考 Token 统计、缓存命中率、上下文窗口与账号额度监控插件。
+> 为 Google Antigravity 桌面版打造的实时 Token 速率、Prompt Cache 保鲜度、无级上下文圆环与双周期（5h / 周）配额节奏监控插件。
 
 ---
 
-## 功能概览
+## 核心特性
 
-- **侧边栏面板（默认安全模式）**：通过 Antigravity 官方 `sidecar_sdk` 运行，无需额外启动参数，直接展示实时速率、近期请求速度曲线、账号模型额度与历史统计。
-- **可选实验性底部内嵌状态条**：通过 CDP Isolated World（隔离世界）将 Shadow DOM 胶囊条挂载到聊天输入框下方，支持自由勾选显示项、悬停详情浮卡、近 16 次请求 SVG 速度曲线、16 周热力图与模型消耗/均速排行。
-- **应用层代理绕过直连**：本地 `language_server` 与 CDP 连接均使用原生回环 TCP（`agent: false` / 自定义 RFC 6455 客户端），不受 `HTTP_PROXY` / `HTTPS_PROXY` / `NODE_USE_ENV_PROXY` 环境变量干扰。
-- **精准速率与去重账本**：将正文输出与 Thinking 思考输出一并纳入流式速率（`tok/s`）计算，过滤 `<50ms` 缓冲突发毛刺，支持按差值更新的原子化本地账本，重启不丢不重。
-- **6 项健康诊断工具（Doctor）**：分别检验插件文件、插件注册、sidecar 启用、主进程调试开关、本地调试端口连通性与运行实例挂载状态。
+- **原生融入的透明底部状态条（可选实验内嵌）**：通过 CDP Isolated World（隔离世界）与 `closed` Shadow DOM 挂载至聊天输入框下方，全透明无边框、极细竖向发丝分隔，原地骨架复用更新不闪烁：
+  - **Gemini 标准内凹四角星（✦）**：按生成中 / 待机 / 离线自动切换克制微动效；
+  - **0%–100% 无级连续跟进上下文圆环**：按真实浮点占比实时平滑推进与连续色阶渐变；
+  - **极简双轨额度 `100/100`**：接入官方 `RetrieveUserQuotaSummary` 接口，左显 **5 小时额度**、右显 **周额度**（旧版自动无缝回退至 `GetUserStatus`）。
+- **三套精选零 AI 味视觉主题一键切换**（浅/深色自适应并同步持久化）：
+  - **瑞士精密（`Swiss`）**：纯白 / 纯炭黑高对比材质、27px 主速率 Hero 读数、1px 发丝线与单色热力图；
+  - **液态磨砂（`Glass`）**：macOS 原生 `blur(22px) saturate(180%)` 通透毛玻璃浮层；
+  - **极客终端（`Mono`）**：全等宽字体 + 5px 利落直角 + 经典翠绿磷光刻度。
+- **配额节奏时间基准线（Pace Tick）**：在 5h 与周双轨 3.5px 进度条上标出当前窗口剩余时间基准竖线，对照一眼判断当前是“节奏充裕”还是“消耗偏快”。
+- **Prompt Cache 保鲜与思考占比**：追踪距上次请求的缓存温热/渐冷状态、实际免重算 Token 总量、Token 构成 Stacked 比例微条、Thinking 思考占比与上下文预估剩余轮次；支持**一键复制脱敏遥测摘要**。
+- **侧边栏面板（默认零参数安全模式）**：通过 Antigravity 官方 `sidecar_sdk` 运行，无需额外启动参数即可随时使用，视觉风格与全部统计能力与底部浮卡完全一致。
+- **应用层代理绕过与原子账本**：本地 `language_server` 与 CDP 连接均使用原生回环 TCP（`agent: false` / 自定义 RFC 6455 客户端），不受代理环境变量干扰；6 项健康诊断工具（Doctor）一键排查内嵌状态。
 
 ---
 
@@ -19,7 +26,7 @@
 
 ### Windows
 
-1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.0.0.zip` 并**完整解压**。
+1. 在 **Releases** 下载 `Antigravity-TokenMeter_v1.1.0.zip` 并**完整解压**。
 2. **先右键系统托盘中的 Antigravity 图标点击「退出」**（确保完全关闭，避免旧实例覆盖配置或吞掉启动参数）。
 3. 双击运行 **`一键安装插件(Windows双击运行).bat`**：
    - 自动部署插件与 `MIT LICENSE`；
@@ -42,13 +49,13 @@ bash scripts/install_mac_linux.sh --enable-inline
 
 ---
 
-## 常见问题排查（为什么别人的机器装完没看到底部状态条？）
+## 常见问题排查（为什么装完没看到底部状态条？）
 
 直接双击 **`一键诊断内嵌状态(Windows).bat`**（支持 `-Json` 输出），它会逐项报告问题所在：
 
 1. **旧版安装未启用 `sidecars` 注册项**：Antigravity 区分插件与 sidecar，须在 `config.json` 中同时启用 `plugins["antigravity-token-meter"]` 与 `sidecars["antigravity-token-meter/meter"]`。请彻底退出客户端后重跑本版安装器。
 2. **系统托盘残留进程**：点击窗口右上角 `X` 默认不会退出 Antigravity。若托盘仍有旧进程，再次打开启动器时 Electron 单实例锁会忽略新的 `--remote-debugging-port=0` 参数。请务必从系统托盘完全退出后再用专用启动器启动。
-3. **仅修改了其中一个快捷方式，但实际点了其他入口**：如使用自定义代理脚本或汉化恢复脚本，请确保实际执行的命令中带有 `--remote-debugging-port=0`。
+3. **实际启动入口未带调试参数**：如使用自定义代理脚本或汉化恢复脚本，请确保实际执行的 `Antigravity.exe` 命令行带有 `--remote-debugging-port=0`。
 
 ---
 
@@ -56,16 +63,16 @@ bash scripts/install_mac_linux.sh --enable-inline
 
 - **实验性内嵌模式的安全边界**：`--remote-debugging-port=0` 仅监听本机回环随机端口，但不具备独立访问认证；任何同机本地进程若具备访问权限理论上均可连接该端口。因此本工具**不会批量修改您的既有系统快捷方式**，仅通过您显式双击独立启动器启用，且可在 `settings.json` 中随时关闭 `inline: false`。
 - **数据分类边界**：
-  1. **内存读取**：调用本机 `language_server` 接口获取请求元数据与模型配置后，立即投影为脱敏数值与模型标签，不长期保留原始完整响应；
+  1. **内存读取**：调用本机 `language_server` 接口获取请求元数据、模型配置与配额摘要后，立即投影为脱敏数值与模型标签，不长期保留原始完整响应；
   2. **本地持久化**：账本仅存储按日期与模型聚合的 Token 计数、流式耗时与经过单向 SHA-256 哈希处理的去重键，不保存对话正文、Prompt、邮箱或凭据；
-  3. **向页面输出**：通过 CDP Isolated World 隔离世界仅向本地主文档投递脱敏统计 JSON，不在宿主默认全局世界暴露桥接 API。
+  3. **向页面输出**：通过 CDP Isolated World 隔离世界仅向本地主文档投递脱敏统计 JSON，不在宿主默认全局世界暴露桥接 API；一键复制摘要同样严格零账号/零会话 ID。
 
 ---
 
 ## 开发者测试与只读预览
 
 ```bash
-# 运行全部单元测试
+# 运行全部 14 项单元测试
 node --test antigravity-token-meter/sidecars/meter/tests/*.test.mjs
 
 # 显式启动本地只读预览（自动生成一次性随机 Token）
