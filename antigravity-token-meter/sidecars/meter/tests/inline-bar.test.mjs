@@ -223,7 +223,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.9',
+    version: '1.2.10',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -317,12 +317,12 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
   const pop = shadow.getElementById('tm-popover');
 
   const expectByChip = {
-    speed: { must: ['生成速率', '134.4', '会话均速'], forbid: ['模型额度', '今日模型分布', '近 14 天趋势'] },
+    speed: { must: ['生成速率', '134.4', '会话均速', 'tm-spark-svg', 'tm-spark-tip'], forbid: ['模型额度', '今日模型分布', '近 14 天趋势'] },
     cache: { must: ['缓存效率', '87%', '未缓存输入'], forbid: ['会话均速', '模型额度', '近 14 天趋势'] },
     context: { must: ['上下文窗口', '33%', '约余 9 轮'], forbid: ['会话均速', '模型额度', '今日模型分布'] },
-    quota: { must: ['模型额度', 'Gemini Models', '竖线为时间基准'], forbid: ['会话均速', '上下文空间充裕', '近 14 天趋势'] },
+    quota: { must: ['模型额度', 'Gemini Models', '82%', '92%', '竖线为时间基准'], forbid: ['会话均速', '上下文空间充裕', '近 14 天趋势'] },
     today: { must: ['今日消耗', '288.80M', '今日模型分布'], forbid: ['模型额度', '近 14 天趋势', '会话均速'] },
-    month: { must: ['本月消耗', '2.68B', '近 14 天趋势'], forbid: ['模型额度', '今日模型分布', '会话均速'] },
+    month: { must: ['本月消耗', '2.68B', '近 14 天趋势', 'tm-trend-svg', 'tm-trend-hit', 'tm-trend-tip', 'tm-trend-readout'], forbid: ['模型额度', '今日模型分布', '会话均速', '<title>2026-'] },
   };
 
   for (const [chipKey, rule] of Object.entries(expectByChip)) {
@@ -385,7 +385,7 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
 
 test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无多余空格且底栏宽窄自适应', async (t) => {
   const snapshot = {
-    version: '1.2.9',
+    version: '1.2.10',
     connected: true,
     preferences: {
       language: 'en',
@@ -466,9 +466,11 @@ test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无�
   const shadow = host.shadowRootMock;
   const pop = shadow.getElementById('tm-popover');
 
-  // 英文 Quota 卡片必须使用等宽短标 5h/7d，严禁出现溢出碰撞进度条的 "Weekly"
+  // 英文 Quota 卡片必须使用等宽短标 5h/7d 且带百分号，严禁出现溢出碰撞进度条的 "Weekly"
   shadow.querySelector('[data-tm-chip="quota"]').dispatchEvent({ type: 'mouseover' });
   assert.ok(pop.innerHTML.includes('>7d<'));
+  assert.ok(pop.innerHTML.includes('95%'));
+  assert.ok(pop.innerHTML.includes('91%'));
   assert.equal(pop.innerHTML.includes('>Weekly<'), false);
   assert.ok(pop.innerHTML.includes('Model Quotas'));
   assert.ok(pop.innerHTML.includes('Left 5h · Right 7d'));
@@ -485,7 +487,7 @@ test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无�
 test('新对话首页无 conversationId 时照常拉取全局额度与本月用量，绝不变灰或空白', async (t) => {
   let calledWith = 'UNSET';
   const snapshot = {
-    version: '1.2.9',
+    version: '1.2.10',
     connected: true,
     conversationUnavailable: true,
     conversation: null,

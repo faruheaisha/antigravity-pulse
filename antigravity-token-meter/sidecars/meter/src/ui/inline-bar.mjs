@@ -30,6 +30,7 @@ export function buildInlineWidgetScript() {
       pinned: false,
       activeTab: 'speed',
       pointerInPop: false,
+      hoveringPopChart: false,
       lastRenderedTab: '',
       lastPopHtml: '',
       modalOpen: false,
@@ -162,8 +163,8 @@ export function buildInlineWidgetScript() {
       var hasWk = typeof p.weeklyFraction === 'number' && Number.isFinite(p.weeklyFraction);
       if (has5h || hasWk) {
         return {
-          left: fmtPctNum(has5h ? p.fiveHourFraction : null),
-          right: fmtPctNum(hasWk ? p.weeklyFraction : null),
+          left: fmtPct(has5h ? p.fiveHourFraction : null),
+          right: fmtPct(hasWk ? p.weeklyFraction : null),
         };
       }
       return { single: fmtPct(p.fallbackFraction) };
@@ -385,11 +386,11 @@ export function buildInlineWidgetScript() {
       if (!enabledTabs.length) return { density: 'full', shown: [], hidden: [] };
       var isEn = state.prefs && state.prefs.language === 'en';
       var fullW = isEn
-        ? { speed: 92, cache: 98, context: 96, quota: 92, today: 94, month: 92 }
-        : { speed: 88, cache: 86, context: 86, quota: 80, today: 88, month: 78 };
+        ? { speed: 92, cache: 98, context: 96, quota: 106, today: 94, month: 92 }
+        : { speed: 88, cache: 86, context: 86, quota: 94, today: 88, month: 78 };
       var compactW = isEn
-        ? { speed: 58, cache: 66, context: 48, quota: 58, today: 68, month: 62 }
-        : { speed: 56, cache: 56, context: 48, quota: 58, today: 58, month: 54 };
+        ? { speed: 58, cache: 66, context: 48, quota: 72, today: 68, month: 62 }
+        : { speed: 56, cache: 56, context: 48, quota: 72, today: 58, month: 54 };
       var sepW = 5;
 
       var totalFull = enabledTabs.reduce(function(acc, k) { return acc + (fullW[k] || 76); }, 0) + Math.max(0, enabledTabs.length - 1) * sepW;
@@ -508,7 +509,7 @@ export function buildInlineWidgetScript() {
 
     function buildSparklineSvg(points) {
       if (!Array.isArray(points) || points.length < 2) {
-        return '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>';
+        return { html: '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>', meta: null };
       }
       var w = 276, h = 42, padX = 3, padY = 6;
       var vals = points.map(function(p) { var v = Number(p && p.tps); return Number.isFinite(v) && v >= 0 ? v : 0; });
@@ -525,16 +526,33 @@ export function buildInlineWidgetScript() {
       var area = padX + ',' + (h - 2) + ' ' + coords.join(' ') + ' ' + (w - padX) + ',' + (h - 2);
       var last = pts[pts.length - 1];
       var midY = (h / 2).toFixed(1);
-      return '<svg class="tm-spark" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
-        '<defs><linearGradient id="tm-sp-area" x1="0" y1="0" x2="0" y2="' + h + '" gradientUnits="userSpaceOnUse">' +
-          '<stop offset="0%" stop-color="currentColor" stop-opacity="0.11"/>' +
-          '<stop offset="100%" stop-color="currentColor" stop-opacity="0"/>' +
-        '</linearGradient></defs>' +
-        '<line x1="0" y1="' + midY + '" x2="' + w + '" y2="' + midY + '" stroke="var(--tm-hairline)" stroke-dasharray="2 3"/>' +
-        '<polygon points="' + area + '" fill="url(#tm-sp-area)"/>' +
-        '<polyline points="' + coords.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-        '<circle cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="2.6" fill="var(--tm-accent)" stroke="var(--tm-card)" stroke-width="1.4"/>' +
-      '</svg>';
+      var items = points.map(function(p, idx) {
+        return {
+          idx: idx + 1,
+          tps: vals[idx],
+          ttft: p && p.ttft != null ? p.ttft : null,
+          tokens: safeInt(p && p.tokens),
+          x: pts[idx][0],
+          y: pts[idx][1],
+        };
+      });
+      return {
+        html: '<svg class="tm-spark tm-chart-interactive" id="tm-spark-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
+          '<defs><linearGradient id="tm-sp-area" x1="0" y1="0" x2="0" y2="' + h + '" gradientUnits="userSpaceOnUse">' +
+            '<stop offset="0%" stop-color="currentColor" stop-opacity="0.11"/>' +
+            '<stop offset="100%" stop-color="currentColor" stop-opacity="0"/>' +
+          '</linearGradient></defs>' +
+          '<line x1="0" y1="' + midY + '" x2="' + w + '" y2="' + midY + '" stroke="var(--tm-hairline)" stroke-dasharray="2 3"/>' +
+          '<polygon points="' + area + '" fill="url(#tm-sp-area)" pointer-events="none"/>' +
+          '<polyline points="' + coords.join(' ') + '" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>' +
+          '<circle id="tm-sp-last" cx="' + last[0].toFixed(1) + '" cy="' + last[1].toFixed(1) + '" r="2.6" fill="var(--tm-accent)" stroke="var(--tm-card)" stroke-width="1.4" pointer-events="none"/>' +
+          '<line id="tm-sp-xhair" x1="0" y1="2" x2="0" y2="' + (h - 2) + '" class="tm-sp-xhair" style="display:none"/>' +
+          '<circle id="tm-sp-halo" cx="0" cy="0" r="6" fill="var(--tm-accent)" fill-opacity="0.18" pointer-events="none" style="display:none"/>' +
+          '<circle id="tm-sp-dot" cx="0" cy="0" r="3.2" fill="var(--tm-card)" stroke="var(--tm-accent)" stroke-width="2" pointer-events="none" style="display:none"/>' +
+          '<rect x="0" y="0" width="' + w + '" height="' + h + '" fill="transparent"/>' +
+        '</svg>',
+        meta: { kind: 'spark', w: w, padX: padX, items: items },
+      };
     }
 
     function buildTokenBreakdownHtml(conv) {
@@ -594,7 +612,9 @@ export function buildInlineWidgetScript() {
     function buildDailyTrendSvg(days, todayDate) {
       var dayMap = Object.create(null);
       (days || []).forEach(function(d) {
-        if (d && d.date) dayMap[d.date] = safeInt(d.total);
+        if (d && d.date) {
+          dayMap[d.date] = { total: safeInt(d.total), requests: safeInt(d.requests) };
+        }
       });
       var now = parseBaseDate(todayDate);
       var bars = [];
@@ -603,23 +623,41 @@ export function buildInlineWidgetScript() {
         var dt = new Date(now);
         dt.setDate(dt.getDate() - i);
         var key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-        var v = dayMap[key] || 0;
+        var rec = dayMap[key];
+        var v = rec ? rec.total : 0;
+        var reqs = rec ? rec.requests : 0;
         if (v > maxVal) maxVal = v;
-        bars.push({ key: key, val: v, isToday: todayDate ? key === todayDate : i === 0 });
+        bars.push({ key: key, val: v, reqs: reqs, isToday: todayDate ? key === todayDate : i === 0 });
       }
-      var w = 278, h = 42, slot = w / bars.length, bw = Math.max(8, slot - 5);
+      var w = 278, h = 44, slot = w / bars.length, bw = Math.max(8, slot - 5);
+      var metaItems = [];
       var rects = bars.map(function(b, idx) {
-        var bh = b.val > 0 ? Math.max(4, Math.round((b.val / maxVal) * (h - 6))) : 2;
+        var bh = b.val > 0 ? Math.max(4, Math.round((b.val / maxVal) * (h - 7))) : 2.5;
         var x = idx * slot + (slot - bw) / 2;
         var y = h - bh;
         var fill = b.val <= 0 ? 'var(--tm-elev)' : b.isToday ? 'var(--tm-accent)' : 'var(--tm-ink-bar)';
         var op = b.val <= 0 ? 1 : b.isToday ? 1 : (0.28 + 0.55 * (b.val / maxVal));
-        return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh + '" rx="2" fill="' + fill + '" fill-opacity="' + op.toFixed(2) + '"><title>' + escapeHtml(b.key + ': ' + fmtTokens(b.val)) + '</title></rect>';
+        metaItems.push({
+          idx: idx,
+          key: b.key,
+          val: b.val,
+          reqs: b.reqs,
+          isToday: b.isToday,
+          cx: idx * slot + slot / 2,
+          topY: y,
+        });
+        return '<g class="tm-trend-col" data-t-idx="' + idx + '">' +
+          '<rect class="tm-trend-hit" x="' + (idx * slot).toFixed(1) + '" y="0" width="' + slot.toFixed(1) + '" height="' + h + '" fill="transparent" data-t-idx="' + idx + '"/>' +
+          '<rect class="tm-trend-bar' + (b.isToday ? ' is-today' : '') + (b.val <= 0 ? ' is-zero' : '') + '" x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + bh + '" rx="2.2" fill="' + fill + '" fill-opacity="' + op.toFixed(2) + '" data-t-idx="' + idx + '"/>' +
+        '</g>';
       }).join('');
-      return '<svg class="tm-trend" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
-        '<line x1="0" y1="' + (h - 0.5) + '" x2="' + w + '" y2="' + (h - 0.5) + '" stroke="var(--tm-hairline)"/>' +
-        rects +
-      '</svg>';
+      return {
+        html: '<svg class="tm-trend tm-chart-interactive" id="tm-trend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '">' +
+          '<line x1="0" y1="' + (h - 0.5) + '" x2="' + w + '" y2="' + (h - 0.5) + '" stroke="var(--tm-hairline)"/>' +
+          rects +
+        '</svg>',
+        meta: { kind: 'trend14', w: w, h: h, items: metaItems },
+      };
     }
 
     function buildContextLargeRingSvg(frac) {
@@ -650,16 +688,18 @@ export function buildInlineWidgetScript() {
         var sessionSpeedText = fmtFixed(conv && conv.tps, 1) || '--';
         var ttftFixed = fmtFixed(conv && conv.ttftSeconds, 2);
         var ttftText = ttftFixed !== null ? ttftFixed + 's' : '--';
+        var sparkRes = buildSparklineSvg(conv && conv.sparkline);
         return {
           title: t('cardSpeed'),
           badge: isRunning ? t('generating') : '',
           footCtx: modelLabel,
+          chartMeta: sparkRes.meta,
           body:
             '<div class="tm-hero">' +
               '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(heroNum) + '</span><span class="tm-hero-unit">' + escapeHtml(t('speedUnit')) + '</span></div>' +
               '<div class="tm-hero-meta">' + escapeHtml(t('streamTime')) + ' <b>' + escapeHtml(streamText) + '</b></div>' +
             '</div>' +
-            '<div class="tm-spark-wrap">' + buildSparklineSvg(conv && conv.sparkline) + '</div>' +
+            '<div class="tm-spark-wrap">' + sparkRes.html + '<div class="tm-mini-tip" id="tm-spark-tip" aria-hidden="true"></div></div>' +
             '<div class="tm-sub-strip tm-sub-strip-tight">' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('sessionSpeed')) + '</div><div class="tm-sub-v">' + escapeHtml(sessionSpeedText) + '</div></div>' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('ttft')) + '</div><div class="tm-sub-v">' + escapeHtml(ttftText) + '</div></div>' +
@@ -722,7 +762,7 @@ export function buildInlineWidgetScript() {
               : (q.fiveHour.pacing && q.fiveHour.pacing.status === 'fast') || (q.weekly.pacing && q.weekly.pacing.status === 'fast')
                 ? 'fast' : 'ok';
             var paceLabel = worst === 'burn' ? t('paceBurn') : worst === 'fast' ? t('paceFast') : t('paceOk');
-            var pairHtml = escapeHtml(fmtPctNum(q.fiveHour.remainingFraction)) + '<span class="tm-slash">/</span>' + escapeHtml(fmtPctNum(q.weekly.remainingFraction));
+            var pairHtml = escapeHtml(fmtPct(q.fiveHour.remainingFraction)) + '<span class="tm-slash">/</span>' + escapeHtml(fmtPct(q.weekly.remainingFraction));
             return '<div class="tm-qitem"><div class="tm-qmeta"><span class="tm-qname" title="' + escapeHtml(q.title) + '">' + escapeHtml(q.title) +
               '</span><span class="tm-qright"><span class="tm-pace-pill ' + worst + '">' + escapeHtml(paceLabel) + '</span><span class="tm-qpair" title="' + escapeHtml(t('quotaPairTip')) + '">' + pairHtml + '</span></span></div>' +
               renderQuotaSubBar(t('quotaTag5h'), q.fiveHour.remainingFraction, q.fiveHour.resetTime, q.fiveHour.pacing) +
@@ -782,17 +822,19 @@ export function buildInlineWidgetScript() {
 
       if (tab === 'month') {
         var um = usage || {};
+        var trendRes = buildDailyTrendSvg(um.days, um.todayDate);
         return {
           title: t('cardMonth'),
           badge: um.monthKey || '',
           footCtx: (safeInt(um.activeDays) > 0 ? (safeInt(um.activeDays) + ' ' + t('activeDays')) : ''),
+          chartMeta: trendRes.meta,
           body:
             '<div class="tm-hero">' +
               '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(fmtTokens(um.monthTokens)) + '</span><span class="tm-hero-unit">tokens</span></div>' +
               '<div class="tm-hero-meta"><b>' + safeInt(um.monthRequests).toLocaleString() + '</b> ' + escapeHtml(t('requests')) + '<br/>' + escapeHtml(t('lifetime')) + ' <b>' + escapeHtml(fmtTokens(um.totalTokens)) + '</b></div>' +
             '</div>' +
-            '<div class="tm-sec-title" style="margin-bottom:4px;"><span>' + escapeHtml(t('dailyTrend')) + '</span></div>' +
-            '<div class="tm-trend-wrap">' + buildDailyTrendSvg(um.days, um.todayDate) + '</div>' +
+            '<div class="tm-sec-title" style="margin-bottom:4px;"><span>' + escapeHtml(t('dailyTrend')) + '</span><span class="tm-chart-readout" id="tm-trend-readout"></span></div>' +
+            '<div class="tm-trend-wrap">' + trendRes.html + '<div class="tm-mini-tip" id="tm-trend-tip" aria-hidden="true"></div></div>' +
             '<div class="tm-sec" style="margin-top:8px;padding-top:8px;">' +
               '<div class="tm-usage-strip">' +
                 '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('today')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(um.todayTokens)) + '</div></div>' +
@@ -1058,8 +1100,20 @@ export function buildInlineWidgetScript() {
         .tm-hero-unit { font-size: 11px; color: var(--tm-muted); font-weight: 500; }
         .tm-hero-meta { font-size: 10.5px; color: var(--tm-muted); text-align: right; font-variant-numeric: tabular-nums; line-height: 1.45; }
         .tm-hero-meta b { color: var(--tm-text); font-weight: 600; }
-        .tm-spark-wrap, .tm-trend-wrap { color: var(--tm-text); margin: 2px 0 9px; }
+        .tm-spark-wrap, .tm-trend-wrap { position: relative; color: var(--tm-text); margin: 2px 0 9px; }
         .tm-spark, .tm-trend { display: block; overflow: visible; }
+        .tm-chart-interactive { cursor: pointer; }
+        .tm-chart-readout { font-family: var(--tm-mono); font-size: 10px; font-weight: 500; color: var(--tm-accent); min-height: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        .tm-trend-bar { transition: fill .12s ease, fill-opacity .12s ease, opacity .12s ease, filter .12s ease; }
+        .tm-trend.has-hover .tm-trend-bar { opacity: 0.32; }
+        .tm-trend.has-hover .tm-trend-bar.active { opacity: 1; fill: var(--tm-accent); fill-opacity: 1; filter: drop-shadow(0 0 4px var(--tm-gem-glow)); }
+        .tm-trend.has-hover .tm-trend-bar.is-zero.active { opacity: 1; fill: var(--tm-muted); fill-opacity: 0.65; filter: none; }
+        .tm-sp-xhair { stroke: var(--tm-muted); stroke-width: 1; stroke-dasharray: 2.5 2.5; opacity: 0.7; pointer-events: none; }
+        .tm-mini-tip { position: absolute; left: 0; top: 0; z-index: 20; pointer-events: none; background: var(--tm-card); border: 1px solid var(--tm-border); border-radius: 7px; box-shadow: 0 8px 20px -6px rgba(15,23,42,0.22), 0 1px 4px rgba(15,23,42,0.08); padding: 4px 8px; font-size: 10.5px; line-height: 1.35; color: var(--tm-text); white-space: nowrap; opacity: 0; transform: translate(-50%, calc(-100% - 6px)); transition: opacity .08s ease; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+        .tm-mini-tip.show { opacity: 1; }
+        .tm-mini-tip-date { font-family: var(--tm-mono); font-size: 9.5px; color: var(--tm-muted); margin-right: 6px; }
+        .tm-mini-tip-val { font-family: var(--tm-mono); font-weight: 600; color: var(--tm-text); font-variant-numeric: tabular-nums; }
+        .tm-mini-tip-sub { font-family: var(--tm-mono); font-size: 9.5px; color: var(--tm-sub); margin-top: 1px; }
         .tm-sub-strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--tm-hairline); border-bottom: 1px solid var(--tm-hairline); padding: 7px 0; margin-bottom: 9px; }
         .tm-sub-strip-tight { margin-bottom: 0; border-bottom: none; padding-bottom: 1px; }
         .tm-sub-cell { padding: 0 8px; border-left: 1px solid var(--tm-hairline); }
@@ -1985,7 +2039,7 @@ export function buildInlineWidgetScript() {
       if (pop) {
         pop.classList.toggle('open', state.popoverOpen);
         if (state.popoverOpen) {
-          if (state.pointerInPop && state.lastRenderedTab === state.activeTab) {
+          if ((state.pointerInPop || state.hoveringPopChart) && state.lastRenderedTab === state.activeTab) {
             positionPopover();
             return;
           }
@@ -2016,9 +2070,129 @@ export function buildInlineWidgetScript() {
           if (state.lastPopHtml !== nextPopHtml || !pop.firstChild) {
             state.lastPopHtml = nextPopHtml;
             pop.innerHTML = nextPopHtml;
+            bindPopoverCharts(pop, card.chartMeta);
           }
           positionPopover();
         }
+      }
+    }
+
+    /**
+     * 为浮卡内的「近 14 天趋势」柱状图与「生成速率」折线图绑定 0ms 零延迟悬停高亮与自定义跟随气泡。
+     */
+    function bindPopoverCharts(popRoot, meta) {
+      if (!popRoot || !meta) return;
+
+      function placeMiniTip(tipEl, wrapEl, fracX, topPx, html) {
+        if (!tipEl || !wrapEl) return;
+        tipEl.innerHTML = html;
+        tipEl.classList.add('show');
+        var wrapW = wrapEl.offsetWidth || 278;
+        var tipW = tipEl.offsetWidth || 110;
+        var rawLeft = fracX * wrapW;
+        var half = tipW / 2;
+        var clamped = Math.max(half + 2, Math.min(wrapW - half - 2, rawLeft));
+        tipEl.style.left = Math.round(clamped) + 'px';
+        tipEl.style.top = Math.max(0, Math.round(topPx)) + 'px';
+      }
+
+      if (meta.kind === 'trend14') {
+        var svg = popRoot.querySelector('#tm-trend-svg');
+        var tip = popRoot.querySelector('#tm-trend-tip');
+        var readout = popRoot.querySelector('#tm-trend-readout');
+        var wrap = svg && svg.parentElement;
+        if (!svg || !meta.items || !meta.items.length) return;
+        var bars = svg.querySelectorAll('.tm-trend-bar');
+
+        function activateBar(idx) {
+          var item = meta.items[idx];
+          if (!item) return;
+          state.hoveringPopChart = true;
+          svg.classList.add('has-hover');
+          bars.forEach(function(b) {
+            b.classList.toggle('active', Number(b.getAttribute('data-t-idx')) === idx);
+          });
+          if (readout) {
+            readout.textContent = fmtShortDate(item.key) + ' · ' + fmtTokens(item.val);
+          }
+          var reqLine = item.reqs > 0 ? '<div class="tm-mini-tip-sub">' + item.reqs.toLocaleString() + ' ' + escapeHtml(t('requests')) + '</div>' : '';
+          var topY = Math.max(4, Math.min(item.topY, meta.h - 14));
+          placeMiniTip(
+            tip,
+            wrap,
+            item.cx / meta.w,
+            topY,
+            '<div><span class="tm-mini-tip-date">' + escapeHtml(item.key) + '</span><span class="tm-mini-tip-val">' + escapeHtml(fmtTokens(item.val)) + '</span></div>' + reqLine
+          );
+        }
+
+        function clearBar() {
+          state.hoveringPopChart = false;
+          svg.classList.remove('has-hover');
+          bars.forEach(function(b) { b.classList.remove('active'); });
+          if (readout) readout.textContent = '';
+          if (tip) tip.classList.remove('show');
+        }
+
+        svg.addEventListener('mousemove', function(ev) {
+          var attr = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-t-idx') : null;
+          if (attr !== null && attr !== '') {
+            activateBar(Number(attr));
+            return;
+          }
+          var rect = svg.getBoundingClientRect ? svg.getBoundingClientRect() : null;
+          if (rect && rect.width > 0) {
+            var frac = Math.max(0, Math.min(0.9999, (ev.clientX - rect.left) / rect.width));
+            activateBar(Math.floor(frac * meta.items.length));
+          }
+        });
+        svg.addEventListener('mouseover', function(ev) {
+          var attr = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-t-idx') : null;
+          if (attr !== null && attr !== '') activateBar(Number(attr));
+        });
+        svg.addEventListener('mouseleave', clearBar);
+      } else if (meta.kind === 'spark') {
+        var spSvg = popRoot.querySelector('#tm-spark-svg');
+        var spTip = popRoot.querySelector('#tm-spark-tip');
+        var spWrap = spSvg && spSvg.parentElement;
+        if (!spSvg || !meta.items || !meta.items.length) return;
+        var spXhair = spSvg.querySelector('#tm-sp-xhair');
+        var spHalo = spSvg.querySelector('#tm-sp-halo');
+        var spDot = spSvg.querySelector('#tm-sp-dot');
+
+        spSvg.addEventListener('mousemove', function(ev) {
+          var rect = spSvg.getBoundingClientRect ? spSvg.getBoundingClientRect() : null;
+          if (!rect || rect.width <= 0) return;
+          state.hoveringPopChart = true;
+          var svgX = ((ev.clientX - rect.left) / rect.width) * meta.w;
+          var ratio = Math.max(0, Math.min(1, (svgX - meta.padX) / Math.max(1, meta.w - meta.padX * 2)));
+          var idx = Math.round(ratio * (meta.items.length - 1));
+          var it = meta.items[idx];
+          if (!it) return;
+          if (spXhair) { spXhair.setAttribute('x1', it.x.toFixed(1)); spXhair.setAttribute('x2', it.x.toFixed(1)); spXhair.style.display = ''; }
+          if (spHalo) { spHalo.setAttribute('cx', it.x.toFixed(1)); spHalo.setAttribute('cy', it.y.toFixed(1)); spHalo.style.display = ''; }
+          if (spDot) { spDot.setAttribute('cx', it.x.toFixed(1)); spDot.setAttribute('cy', it.y.toFixed(1)); spDot.style.display = ''; }
+          var tpsStr = fmtFixed(it.tps, 1) || '--';
+          var ttftStr = fmtFixed(it.ttft, 2);
+          var subParts = [];
+          if (ttftStr !== null) subParts.push(t('ttft') + ' ' + ttftStr + 's');
+          if (it.tokens > 0) subParts.push(fmtTokens(it.tokens) + ' tok');
+          placeMiniTip(
+            spTip,
+            spWrap,
+            it.x / meta.w,
+            Math.max(4, it.y - 2),
+            '<div><span class="tm-mini-tip-date">#' + it.idx + '</span><span class="tm-mini-tip-val">' + escapeHtml(tpsStr + ' ' + t('speedUnit')) + '</span></div>' +
+            (subParts.length ? '<div class="tm-mini-tip-sub">' + escapeHtml(subParts.join(' · ')) + '</div>' : '')
+          );
+        });
+        spSvg.addEventListener('mouseleave', function() {
+          state.hoveringPopChart = false;
+          if (spXhair) spXhair.style.display = 'none';
+          if (spHalo) spHalo.style.display = 'none';
+          if (spDot) spDot.style.display = 'none';
+          if (spTip) spTip.classList.remove('show');
+        });
       }
     }
 
@@ -2383,6 +2557,7 @@ export function buildInlineWidgetScript() {
 
     async function updatePrefs(patch) {
       state.pointerInPop = false;
+      state.hoveringPopChart = false;
       try {
         if (window.__agTokenMeterApi) {
           var next = await window.__agTokenMeterApi.setPrefs(patch);
@@ -2425,11 +2600,15 @@ export function buildInlineWidgetScript() {
           if (!state.popoverOpen || state.activeTab !== tab) {
             state.activeTab = tab;
             state.popoverOpen = true;
+            state.hoveringPopChart = false;
             renderBar();
           }
         });
         popNode.addEventListener('mouseenter', function() {
           clearTimeout(state.hoverTimer);
+        });
+        popNode.addEventListener('mouseleave', function() {
+          state.hoveringPopChart = false;
         });
         popNode.addEventListener('pointerdown', function() {
           state.pointerInPop = true;
@@ -2457,6 +2636,7 @@ export function buildInlineWidgetScript() {
           } else if (bid === 'tm-open-modal') {
             clearTimeout(state.hoverTimer);
             state.pointerInPop = false;
+            state.hoveringPopChart = false;
             state.popoverOpen = false;
             state.pinned = false;
             state.modalOpen = true;
@@ -2470,6 +2650,7 @@ export function buildInlineWidgetScript() {
           state.hoverTimer = setTimeout(function() {
             state.popoverOpen = false;
             state.pointerInPop = false;
+            state.hoveringPopChart = false;
             renderBar();
           }, 220);
         });
@@ -2607,6 +2788,7 @@ export function buildInlineWidgetScript() {
       state.disposed = true;
       state.barLayoutKey = '';
       state.pointerInPop = false;
+      state.hoveringPopChart = false;
       state.requestSeq++;
       clearInterval(pollTimer);
       clearTimeout(mountDebounce);

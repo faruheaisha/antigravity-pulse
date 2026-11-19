@@ -287,7 +287,7 @@
             if (item.fiveHour && item.weekly) {
               const p5 = Math.round(Math.max(0, Math.min(1, Number(item.fiveHour.remainingFraction) || 0)) * 100);
               const pw = Math.round(Math.max(0, Math.min(1, Number(item.weekly.remainingFraction) || 0)) * 100);
-              return `<div class="q-item"><div class="q-meta"><span class="q-name">${esc(item.title)}</span><span class="q-pair" title="${esc(t('quotaPairTip'))}">${p5}<span class="q-slash">/</span>${pw}</span></div>` +
+              return `<div class="q-item"><div class="q-meta"><span class="q-name">${esc(item.title)}</span><span class="q-pair" title="${esc(t('quotaPairTip'))}">${p5}%<span class="q-slash">/</span>${pw}%</span></div>` +
                 renderSubBar(t('quotaTag5h'), item.fiveHour.remainingFraction, item.fiveHour.resetTime, item.fiveHour.pacing) +
                 renderSubBar(t('quotaTagWeek'), item.weekly.remainingFraction, item.weekly.resetTime, item.weekly.pacing) +
               `</div>`;
