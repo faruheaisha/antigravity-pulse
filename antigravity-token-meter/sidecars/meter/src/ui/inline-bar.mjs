@@ -1014,9 +1014,12 @@ export function buildInlineWidgetScript() {
             lastLblX = x;
             lbl = '<text x="' + x.toFixed(1) + '" y="' + (wh - 2) + '" class="tm-z-ax">' + escapeHtml(fmtMonthTick(item.month)) + '</text>';
           }
-          return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + barH + '" rx="3.5" class="' + cls + '"><title>' + escapeHtml(item.startKey + ' ~ ' + item.endKey + ': ' + fmtTokens(item.val)) + '</title></rect>' + lbl;
+          return '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + bw.toFixed(1) + '" height="' + barH + '" rx="3.5" class="tm-z-wbar ' + cls + '" data-z-title="' + escapeHtml(item.startKey + ' ~ ' + item.endKey) + '" data-z-val="' + escapeHtml(fmtStatsTokens(item.val) + ' ' + t('tokensUnit')) + '"/>' + lbl;
         }).join('');
-        return '<svg class="tm-z-svg" viewBox="0 0 ' + ww + ' ' + wh + '" width="100%" preserveAspectRatio="xMidYMid meet">' + wBars + '</svg>';
+        return {
+          html: '<svg class="tm-z-svg" id="tm-zact-svg" viewBox="0 0 ' + ww + ' ' + wh + '" width="100%" preserveAspectRatio="xMidYMid meet">' + wBars + '</svg>',
+          meta: { kind: 'weekly' },
+        };
       }
 
       if (mode === 'cumulative') {
@@ -1035,10 +1038,11 @@ export function buildInlineWidgetScript() {
           var cd = new Date(now);
           cd.setDate(cd.getDate() - ci);
           var ck = cd.getFullYear() + '-' + String(cd.getMonth() + 1).padStart(2, '0') + '-' + String(cd.getDate()).padStart(2, '0');
-          running += dayMap[ck] || 0;
-          series.push({ key: ck, val: running, month: cd.getMonth() + 1 });
+          var delta = dayMap[ck] || 0;
+          running += delta;
+          series.push({ key: ck, delta: delta, val: running, month: cd.getMonth() + 1 });
         }
-        var cw = 725, ch = 114, padL = 44, padR = 8, padT = 8, padB2 = 18;
+        var cw = 725, ch = 114, padL = 52, padR = 12, padT = 8, padB2 = 18;
         var maxC = Math.max(1, series.length ? series[series.length - 1].val : 1);
         for (var si = 0; si < series.length; si++) {
           var px = padL + (si / Math.max(1, series.length - 1)) * (cw - padL - padR);
@@ -1059,15 +1063,22 @@ export function buildInlineWidgetScript() {
             }
           }
         }
-        return '<svg class="tm-z-svg" viewBox="0 0 ' + cw + ' ' + ch + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
-          '<defs><linearGradient id="tm-zcum-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--tm-z-blue)" stop-opacity="0.22"/><stop offset="100%" stop-color="var(--tm-z-blue)" stop-opacity="0.01"/></linearGradient></defs>' +
-          '<line x1="' + padL + '" y1="' + baseY + '" x2="' + (cw - padR) + '" y2="' + baseY + '" stroke="var(--tm-hairline)"/>' +
-          '<text x="' + (padL - 6) + '" y="' + (padT + 6) + '" text-anchor="end" class="tm-z-ax">' + escapeHtml(fmtTokens(maxC)) + '</text>' +
-          '<text x="' + (padL - 6) + '" y="' + (baseY + 2) + '" text-anchor="end" class="tm-z-ax">0</text>' +
-          '<path d="' + areaPath + '" fill="url(#tm-zcum-grad)"/>' +
-          '<path d="' + linePath + '" fill="none" stroke="var(--tm-z-blue)" stroke-width="2" stroke-linecap="round"/>' +
-          cLabels +
-        '</svg>';
+        return {
+          html: '<svg class="tm-z-svg tm-z-interactive" id="tm-zcum-svg" viewBox="0 0 ' + cw + ' ' + ch + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
+            '<defs><linearGradient id="tm-zcum-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--tm-z-blue)" stop-opacity="0.22"/><stop offset="100%" stop-color="var(--tm-z-blue)" stop-opacity="0.01"/></linearGradient></defs>' +
+            '<line x1="' + padL + '" y1="' + baseY + '" x2="' + (cw - padR) + '" y2="' + baseY + '" stroke="var(--tm-hairline)"/>' +
+            '<text x="' + (padL - 6) + '" y="' + (padT + 6) + '" text-anchor="end" class="tm-z-ax">' + escapeHtml(fmtStatsTokens(maxC)) + '</text>' +
+            '<text x="' + (padL - 6) + '" y="' + (baseY + 2) + '" text-anchor="end" class="tm-z-ax">0</text>' +
+            '<path d="' + areaPath + '" fill="url(#tm-zcum-grad)" pointer-events="none"/>' +
+            '<path d="' + linePath + '" fill="none" stroke="var(--tm-z-blue)" stroke-width="2" stroke-linecap="round" pointer-events="none"/>' +
+            '<line id="tm-zcum-xhair" x1="0" y1="' + padT + '" x2="0" y2="' + baseY + '" class="tm-z-xhair" style="display:none"/>' +
+            '<circle id="tm-zcum-halo" cx="0" cy="0" r="7.5" fill="var(--tm-z-blue)" fill-opacity="0.18" pointer-events="none" style="display:none"/>' +
+            '<circle id="tm-zcum-dot" cx="0" cy="0" r="3.8" fill="var(--tm-card)" stroke="var(--tm-z-blue)" stroke-width="2.2" pointer-events="none" style="display:none"/>' +
+            '<rect x="' + padL + '" y="' + padT + '" width="' + (cw - padL - padR) + '" height="' + (baseY - padT) + '" fill="transparent"/>' +
+            cLabels +
+          '</svg>',
+          meta: { kind: 'cumulative', cw: cw, padL: padL, padR: padR, series: series, pts: cumPts },
+        };
       }
 
       // 默认：52 周 1:1 标准正方形圆角日历热力图 + 底部月份刻度（仿 ZCode 布局）
@@ -1119,11 +1130,14 @@ export function buildInlineWidgetScript() {
           var item = colObj.items[rr];
           if (!item) continue;
           var lvl = item.val <= 0 ? 'tm-zc-0' : item.val > maxVal * 0.72 ? 'tm-zc-4' : item.val > maxVal * 0.40 ? 'tm-zc-3' : item.val > maxVal * 0.14 ? 'tm-zc-2' : 'tm-zc-1';
-          rectsHtml += '<rect x="' + item.x + '" y="' + item.y + '" width="' + cellSize + '" height="' + cellSize + '" rx="2.6" class="' + lvl + '"><title>' + escapeHtml(item.key + ': ' + fmtTokens(item.val) + ' tokens') + '</title></rect>';
+          rectsHtml += '<rect x="' + item.x + '" y="' + item.y + '" width="' + cellSize + '" height="' + cellSize + '" rx="2.6" class="tm-z-hcell ' + lvl + '" data-z-title="' + escapeHtml(item.key) + '" data-z-val="' + escapeHtml(fmtStatsTokens(item.val) + ' ' + t('tokensUnit')) + '"/>';
         }
       }
 
-      return '<svg class="tm-z-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '" width="100%" preserveAspectRatio="xMidYMid meet">' + rectsHtml + monthLabelsHtml + '</svg>';
+      return {
+        html: '<svg class="tm-z-svg" id="tm-zact-svg" viewBox="0 0 ' + svgW + ' ' + svgH + '" width="100%" preserveAspectRatio="xMidYMid meet">' + rectsHtml + monthLabelsHtml + '</svg>',
+        meta: { kind: 'daily' },
+      };
     }
 
     var Z_PALETTE = ['#2563eb', '#0ea5e9', '#6366f1', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6'];
@@ -1194,7 +1208,7 @@ export function buildInlineWidgetScript() {
       var info = computeRangeModelBreakdown(usage, rangeDays);
       var ranked = info.ranked;
       if (!ranked.length) {
-        return '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>';
+        return { html: '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>', meta: null };
       }
 
       var maxSlices = 5;
@@ -1222,14 +1236,16 @@ export function buildInlineWidgetScript() {
       }
 
       var total = slices.reduce(function(acc, s) { return acc + s.totalTokens; }, 0);
-      if (total <= 0) return '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>';
+      if (total <= 0) return { html: '<div class="tm-empty">' + escapeHtml(t('noData')) + '</div>', meta: null };
 
       var cx = 104, cy = 104, rOuter = 88, rInner = 56;
       var startAngle = -Math.PI / 2;
       var pathsHtml = '';
+      var sliceMeta = [];
 
       if (slices.length === 1) {
-        pathsHtml = '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((rOuter + rInner) / 2).toFixed(1) + '" fill="none" stroke="' + slices[0].color + '" stroke-width="' + (rOuter - rInner) + '"><title>' + escapeHtml(slices[0].label + ': ' + fmtStatsTokens(slices[0].totalTokens) + ' (100%)') + '</title></circle>';
+        sliceMeta.push({ label: slices[0].label, valText: fmtStatsTokens(slices[0].totalTokens), pctText: '100%', color: slices[0].color, avgTps: slices[0].avgTps });
+        pathsHtml = '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((rOuter + rInner) / 2).toFixed(1) + '" fill="none" stroke="' + slices[0].color + '" stroke-width="' + (rOuter - rInner) + '" class="tm-z-slice" data-z-slice="0"/>';
       } else {
         for (var si = 0; si < slices.length; si++) {
           var s = slices[si];
@@ -1250,21 +1266,23 @@ export function buildInlineWidgetScript() {
             ' L ' + x3.toFixed(2) + ' ' + y3.toFixed(2) +
             ' A ' + rInner + ' ' + rInner + ' 0 ' + largeArc + ' 0 ' + x4.toFixed(2) + ' ' + y4.toFixed(2) + ' Z';
           var pctStr = frac >= 0.1 ? Math.round(frac * 100) + '%' : (frac * 100).toFixed(1) + '%';
-          pathsHtml += '<path d="' + d + '" fill="' + s.color + '" stroke="var(--tm-z-surface)" stroke-width="2.2"><title>' + escapeHtml(s.label + ': ' + fmtStatsTokens(s.totalTokens) + ' (' + pctStr + ')') + '</title></path>';
+          sliceMeta.push({ label: s.label, valText: fmtStatsTokens(s.totalTokens), pctText: pctStr, color: s.color, avgTps: s.avgTps });
+          pathsHtml += '<path d="' + d + '" fill="' + s.color + '" stroke="var(--tm-z-surface)" stroke-width="2.2" class="tm-z-slice" data-z-slice="' + si + '"/>';
           startAngle = endAngle;
         }
       }
 
+      var totalText = fmtStatsTokens(total);
       var donutSvg =
         '<div class="tm-z-donut-box">' +
-          '<svg class="tm-z-donut-svg" viewBox="0 0 208 208" width="208" height="208">' + pathsHtml + '</svg>' +
-          '<div class="tm-z-donut-center"><div class="tm-z-donut-val">' + escapeHtml(fmtStatsTokens(total)) + '</div><div class="tm-z-donut-unit">' + escapeHtml(t('tokensUnit')) + '</div></div>' +
+          '<svg class="tm-z-donut-svg" id="tm-zdonut-svg" viewBox="0 0 208 208" width="208" height="208">' + pathsHtml + '</svg>' +
+          '<div class="tm-z-donut-center"><div class="tm-z-donut-val" id="tm-zdonut-val">' + escapeHtml(totalText) + '</div><div class="tm-z-donut-unit" id="tm-zdonut-unit">' + escapeHtml(t('tokensUnit')) + '</div></div>' +
         '</div>';
 
-      var listHtml = '<div class="tm-z-pie-list">' + slices.map(function(s) {
+      var listHtml = '<div class="tm-z-pie-list" id="tm-zpie-list">' + slices.map(function(s, si) {
         var share = s.totalTokens / total;
         var pctLabel = share >= 0.1 ? Math.round(share * 100) + '%' : (share * 100).toFixed(1) + '%';
-        return '<div class="tm-z-pie-row">' +
+        return '<div class="tm-z-pie-row" data-z-slice="' + si + '">' +
           '<span class="tm-z-pie-sw" style="background:' + s.color + '"></span>' +
           '<span class="tm-z-pie-name" title="' + escapeHtml(s.label) + '">' + escapeHtml(s.label) + '</span>' +
           '<span class="tm-z-pie-pct">' + escapeHtml(pctLabel) + '</span>' +
@@ -1272,7 +1290,10 @@ export function buildInlineWidgetScript() {
         '</div>';
       }).join('') + '</div>';
 
-      return '<div class="tm-z-pie-grid">' + donutSvg + listHtml + '</div>';
+      return {
+        html: '<div class="tm-z-pie-grid">' + donutSvg + listHtml + '</div>',
+        meta: { totalText: totalText, totalUnit: t('tokensUnit'), slices: sliceMeta },
+      };
     }
 
     function buildZSmoothTrendSvg(usage, rangeDays, selectedModel) {
@@ -1342,6 +1363,7 @@ export function buildInlineWidgetScript() {
       var pathsHtml = '';
       var dotsHtml = '';
       var singleSeries = seriesList.length === 1;
+      var seriesCoords = [];
 
       for (var sIdx = 0; sIdx < seriesList.length; sIdx++) {
         var ser = seriesList[sIdx];
@@ -1350,19 +1372,17 @@ export function buildInlineWidgetScript() {
           var y = padT + (1 - v / scaleMax) * plotH;
           return [x, y];
         });
+        seriesCoords.push(coords);
         var lineD = buildMonotoneSplinePath(coords);
         if (singleSeries) {
           var areaD = lineD + ' L ' + coords[coords.length - 1][0].toFixed(1) + ',' + baseY.toFixed(1) + ' L ' + coords[0][0].toFixed(1) + ',' + baseY.toFixed(1) + ' Z';
-          pathsHtml += '<path d="' + areaD + '" fill="' + ser.color + '" fill-opacity="0.10"/>';
+          pathsHtml += '<path d="' + areaD + '" fill="' + ser.color + '" fill-opacity="0.10" pointer-events="none"/>';
         }
-        pathsHtml += '<path d="' + lineD + '" fill="none" stroke="' + ser.color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>';
+        pathsHtml += '<path d="' + lineD + '" fill="none" stroke="' + ser.color + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" pointer-events="none"/>';
         var rDot = rangeDays <= 7 ? 3 : 2.1;
         for (var pi = 0; pi < coords.length; pi++) {
           if (ser.values[pi] <= 0) continue;
-          dotsHtml += '<g>' +
-            '<circle cx="' + coords[pi][0].toFixed(1) + '" cy="' + coords[pi][1].toFixed(1) + '" r="9" fill="transparent"><title>' + escapeHtml(fmtShortDate(dateKeys[pi]) + ' · ' + ser.label + ': ' + fmtStatsTokens(ser.values[pi])) + '</title></circle>' +
-            '<circle cx="' + coords[pi][0].toFixed(1) + '" cy="' + coords[pi][1].toFixed(1) + '" r="' + rDot + '" fill="var(--tm-card)" stroke="' + ser.color + '" stroke-width="1.7" pointer-events="none"/>' +
-          '</g>';
+          dotsHtml += '<circle cx="' + coords[pi][0].toFixed(1) + '" cy="' + coords[pi][1].toFixed(1) + '" r="' + rDot + '" fill="var(--tm-card)" stroke="' + ser.color + '" stroke-width="1.7" pointer-events="none"/>';
         }
       }
 
@@ -1376,9 +1396,16 @@ export function buildInlineWidgetScript() {
         }
       }
 
-      return '<svg class="tm-z-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
-        gridHtml + pathsHtml + dotsHtml + xLabelsHtml +
-      '</svg>';
+      return {
+        html: '<svg class="tm-z-svg tm-z-interactive" id="tm-ztrend-svg" viewBox="0 0 ' + w + ' ' + h + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
+          gridHtml + pathsHtml + dotsHtml +
+          '<line id="tm-ztrend-xhair" x1="0" y1="' + padT + '" x2="0" y2="' + baseY + '" class="tm-z-xhair" style="display:none"/>' +
+          '<g id="tm-ztrend-active" pointer-events="none"></g>' +
+          '<rect x="' + padL + '" y="' + padT + '" width="' + plotW + '" height="' + plotH + '" fill="transparent"/>' +
+          xLabelsHtml +
+        '</svg>',
+        meta: { w: w, padL: padL, plotW: plotW, dateKeys: dateKeys, seriesList: seriesList, seriesCoords: seriesCoords },
+      };
     }
 
     function modalStyles() {
@@ -1480,12 +1507,31 @@ export function buildInlineWidgetScript() {
         .tm-z-donut-val { font-size: 16px; font-weight: 650; letter-spacing: -0.02em; color: var(--tm-text); font-variant-numeric: tabular-nums; }
         .tm-z-donut-unit { font-size: 11px; color: var(--tm-muted); margin-top: 2px; }
         .tm-z-pie-list { min-width: 0; }
-        .tm-z-pie-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; padding: 7px 0; border-bottom: 1px solid var(--tm-hairline); }
-        .tm-z-pie-row:last-child { border-bottom: none; padding-bottom: 0; }
+        .tm-z-pie-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; padding: 7px 6px; margin: 0 -6px; border-radius: 8px; border-bottom: 1px solid var(--tm-hairline); transition: background .12s ease; cursor: default; }
+        .tm-z-pie-row:last-child { border-bottom: none; }
+        .tm-z-pie-row.active { background: var(--tm-hover); }
         .tm-z-pie-sw { width: 9px; height: 9px; border-radius: 2.5px; flex-shrink: 0; }
         .tm-z-pie-name { font-family: var(--tm-mono); font-size: 11.5px; color: var(--tm-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .tm-z-pie-pct { font-family: var(--tm-mono); font-size: 11.5px; color: var(--tm-muted); font-variant-numeric: tabular-nums; }
         .tm-z-pie-sub { grid-column: 2 / 4; font-size: 11px; color: var(--tm-muted); font-variant-numeric: tabular-nums; }
+
+        /* 图表实时互动样式：准星、高亮方块/柱/扇区与 0ms 跟随浮卡 */
+        .tm-z-interactive { cursor: crosshair; }
+        .tm-z-xhair { stroke: var(--tm-muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.72; pointer-events: none; }
+        .tm-z-hcell { cursor: pointer; transition: stroke .1s ease, opacity .1s ease; }
+        .tm-z-hcell:hover { stroke: var(--tm-text); stroke-width: 1.3; }
+        .tm-z-wbar { cursor: pointer; transition: opacity .12s ease, filter .12s ease; }
+        .tm-z-wbar:hover { filter: brightness(1.08); stroke: var(--tm-text); stroke-width: 1; }
+        .tm-z-slice { cursor: pointer; transform-box: fill-box; transform-origin: center; transition: transform .16s ease, opacity .16s ease; }
+        .tm-z-donut-svg.has-active .tm-z-slice { opacity: 0.42; }
+        .tm-z-donut-svg.has-active .tm-z-slice.active { opacity: 1; transform: scale(1.035); }
+        .tm-z-tip { position: fixed; z-index: 2147483647; pointer-events: none; min-width: 158px; max-width: 270px; background: var(--tm-card); border: 1px solid var(--tm-border); border-radius: 10px; box-shadow: 0 12px 30px -8px rgba(15,23,42,0.22), 0 2px 6px rgba(15,23,42,0.08); padding: 9px 11px; font-size: 11px; color: var(--tm-text); opacity: 0; transform: translate3d(0, 3px, 0); transition: opacity .1s ease, transform .1s ease; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+        .tm-z-tip.show { opacity: 1; transform: translate3d(0, 0, 0); }
+        .tm-z-tip-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-weight: 600; font-size: 11.5px; color: var(--tm-text); padding-bottom: 5px; margin-bottom: 5px; border-bottom: 1px solid var(--tm-hairline); }
+        .tm-z-tip-head em { font-style: normal; font-family: var(--tm-mono); font-size: 10.5px; font-weight: 500; color: var(--tm-muted); }
+        .tm-z-tip-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0; line-height: 1.35; }
+        .tm-z-tip-k { display: inline-flex; align-items: center; gap: 5px; color: var(--tm-sub); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-z-tip-v { font-family: var(--tm-mono); font-weight: 600; color: var(--tm-text); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
         .tm-pref-row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; }
         .tm-toggles { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1696,11 +1742,16 @@ export function buildInlineWidgetScript() {
       }
     }
 
-    function renderModal() {
+    function renderModal(force) {
       if (!state.modalOpen) {
         state.lastModalHtml = '';
         if (modalHost) { modalHost.remove(); modalHost = null; modalShadow = null; }
         return;
+      }
+      // 鼠标正在图表上查看悬停浮窗时跳过后台静默重绘，避免准星与浮窗闪断
+      if (!force && modalShadow) {
+        var curTip = modalShadow.getElementById('tm-z-tip');
+        if (curTip && curTip.classList.contains('show')) return;
       }
       if (!modalHost) {
         modalHost = document.createElement('div');
@@ -1731,7 +1782,10 @@ export function buildInlineWidgetScript() {
           return '<button type="button" class="tm-z-leg ' + (trendModel === name ? 'active' : '') + '" data-trend-model="' + escapeHtml(name) + '"><i class="tm-z-dot" style="background:' + Z_PALETTE[idx % Z_PALETTE.length] + '"></i>' + escapeHtml(name) + '</button>';
         }).join('');
 
-      var modelsHtml = buildZModelDonutHtml(usage, rangeDays);
+      var actChart = buildZActivitySvg(usage, actMode);
+      var trendChart = buildZSmoothTrendSvg(usage, rangeDays, trendModel);
+      var donutChart = buildZModelDonutHtml(usage, rangeDays);
+      var modelsHtml = donutChart.html;
 
       var actSeg = [
         ['daily', t('actDaily')],
@@ -1790,13 +1844,13 @@ export function buildInlineWidgetScript() {
             '</div>' +
             '<div class="tm-z-card">' +
               '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('tokenActivity')) + '</span><div class="tm-z-seg">' + actSeg + '</div></div>' +
-              buildZActivitySvg(usage, actMode) +
+              actChart.html +
             '</div>' +
             '<div class="tm-z-toolbar"><span class="tm-z-toolbar-label">' + escapeHtml(t('timeRange')) + '</span><div class="tm-z-seg">' + rangeSeg + '</div></div>' +
             '<div class="tm-z-card">' +
-              '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('dailyTokenTrend')) + '</span><span class="tm-z-card-sub">' + escapeHtml(t('today')) + ' ' + escapeHtml(fmtTokens(usage.todayTokens)) + '</span></div>' +
+              '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('dailyTokenTrend')) + '</span><span class="tm-z-card-sub">' + escapeHtml(t('today')) + ' ' + escapeHtml(fmtStatsTokens(usage.todayTokens)) + '</span></div>' +
               '<div class="tm-z-legends">' + legendHtml + '</div>' +
-              buildZSmoothTrendSvg(usage, rangeDays, trendModel) +
+              trendChart.html +
             '</div>' +
             '<div class="tm-z-card">' +
               '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('modelUsageTitle')) + '</span><span class="tm-z-card-sub">' + safeInt(usage.totalRequests).toLocaleString() + ' ' + escapeHtml(t('requests')) + '</span></div>' +
@@ -1807,6 +1861,7 @@ export function buildInlineWidgetScript() {
               '<div class="tm-pref-row"><div class="tm-toggles">' + toggles + '</div><div class="tm-z-seg">' + styleSeg + '</div></div>' +
             '</div>' +
           '</div>' +
+          '<div class="tm-z-tip" id="tm-z-tip" aria-hidden="true"></div>' +
         '</div>';
 
       if (state.lastModalHtml === nextModalHtml && modalShadow.firstChild) return;
@@ -1837,21 +1892,21 @@ export function buildInlineWidgetScript() {
         btn.onclick = function(ev) {
           if (!ev || ev.isTrusted !== true) return;
           state.modalActivityMode = btn.getAttribute('data-act-mode') || 'daily';
-          renderModal();
+          renderModal(true);
         };
       });
       modalShadow.querySelectorAll('[data-range-days]').forEach(function(btn) {
         btn.onclick = function(ev) {
           if (!ev || ev.isTrusted !== true) return;
           state.modalRangeDays = Number(btn.getAttribute('data-range-days')) === 30 ? 30 : 7;
-          renderModal();
+          renderModal(true);
         };
       });
       modalShadow.querySelectorAll('[data-trend-model]').forEach(function(btn) {
         btn.onclick = function(ev) {
           if (!ev || ev.isTrusted !== true) return;
           state.modalTrendModel = btn.getAttribute('data-trend-model') || 'ALL';
-          renderModal();
+          renderModal(true);
         };
       });
       modalShadow.querySelectorAll('input[data-pref-key]').forEach(function(inp) {
@@ -1868,6 +1923,177 @@ export function buildInlineWidgetScript() {
           void updatePrefs({ theme: btn.getAttribute('data-theme-pick') });
         };
       });
+
+      // 绑定全部图表的 0ms 零延迟跟随交互：准星、高亮节点、自定义浮窗与圆环双向联动
+      var tipEl = modalShadow.getElementById('tm-z-tip');
+      function placeTip(ev, html) {
+        if (!tipEl) return;
+        tipEl.innerHTML = html;
+        tipEl.classList.add('show');
+        var vv = window.visualViewport;
+        var vw = vv ? vv.width : window.innerWidth;
+        var vh = vv ? vv.height : window.innerHeight;
+        var tw = tipEl.offsetWidth || 190;
+        var th = tipEl.offsetHeight || 72;
+        var x = (ev.clientX || 0) + 14;
+        var y = (ev.clientY || 0) - th - 12;
+        if (x + tw + 10 > vw) x = Math.max(10, (ev.clientX || 0) - tw - 14);
+        if (y < 10) y = Math.min(vh - th - 10, (ev.clientY || 0) + 16);
+        tipEl.style.left = Math.round(x) + 'px';
+        tipEl.style.top = Math.round(y) + 'px';
+      }
+      function hideTip() {
+        if (tipEl) tipEl.classList.remove('show');
+      }
+
+      // 1. Token 活动：每日热力图 / 每周柱图实时浮卡
+      var actSvg = modalShadow.getElementById('tm-zact-svg');
+      if (actSvg) {
+        actSvg.addEventListener('mousemove', function(ev) {
+          var target = ev.target;
+          var ttl = target && target.getAttribute ? target.getAttribute('data-z-title') : null;
+          if (!ttl) { hideTip(); return; }
+          var val = target.getAttribute('data-z-val') || '0';
+          placeTip(ev,
+            '<div class="tm-z-tip-head"><span>' + escapeHtml(ttl) + '</span></div>' +
+            '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot"></i>' + escapeHtml(t('tokenActivity')) + '</span><span class="tm-z-tip-v">' + escapeHtml(val) + '</span></div>'
+          );
+        });
+        actSvg.addEventListener('mouseleave', hideTip);
+      }
+
+      // 2. Token 活动：累计平滑面积图（准星 + 高亮节点 + 当日新增/截至累计浮卡）
+      var cumSvg = modalShadow.getElementById('tm-zcum-svg');
+      if (cumSvg && actChart.meta && actChart.meta.kind === 'cumulative') {
+        var cm = actChart.meta;
+        var cXhair = modalShadow.getElementById('tm-zcum-xhair');
+        var cHalo = modalShadow.getElementById('tm-zcum-halo');
+        var cDot = modalShadow.getElementById('tm-zcum-dot');
+        cumSvg.addEventListener('mousemove', function(ev) {
+          var rect = cumSvg.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || !cm.series.length) return;
+          var svgX = ((ev.clientX - rect.left) / rect.width) * cm.cw;
+          var ratio = Math.max(0, Math.min(1, (svgX - cm.padL) / Math.max(1, cm.cw - cm.padL - cm.padR)));
+          var idx = Math.round(ratio * (cm.series.length - 1));
+          var item = cm.series[idx];
+          var pt = cm.pts[idx];
+          if (!item || !pt) return;
+          if (cXhair) { cXhair.setAttribute('x1', pt[0].toFixed(1)); cXhair.setAttribute('x2', pt[0].toFixed(1)); cXhair.style.display = ''; }
+          if (cHalo) { cHalo.setAttribute('cx', pt[0].toFixed(1)); cHalo.setAttribute('cy', pt[1].toFixed(1)); cHalo.style.display = ''; }
+          if (cDot) { cDot.setAttribute('cx', pt[0].toFixed(1)); cDot.setAttribute('cy', pt[1].toFixed(1)); cDot.style.display = ''; }
+          placeTip(ev,
+            '<div class="tm-z-tip-head"><span>' + escapeHtml(item.key) + '</span></div>' +
+            '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot"></i>' + escapeHtml(t('cumLabel')) + '</span><span class="tm-z-tip-v">' + escapeHtml(fmtStatsTokens(item.val)) + '</span></div>' +
+            '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot" style="background:var(--tm-muted)"></i>' + escapeHtml(t('dayDelta')) + '</span><span class="tm-z-tip-v">' + escapeHtml(fmtStatsTokens(item.delta)) + '</span></div>'
+          );
+        });
+        cumSvg.addEventListener('mouseleave', function() {
+          if (cXhair) cXhair.style.display = 'none';
+          if (cHalo) cHalo.style.display = 'none';
+          if (cDot) cDot.style.display = 'none';
+          hideTip();
+        });
+      }
+
+      // 3. 每日 Token 趋势图（全列吸附准星 + 多曲线交点发光高亮 + 仅展示当日 >0 用量模型明细）
+      var trendSvg = modalShadow.getElementById('tm-ztrend-svg');
+      if (trendSvg && trendChart.meta) {
+        var tm = trendChart.meta;
+        var tXhair = modalShadow.getElementById('tm-ztrend-xhair');
+        var tActive = modalShadow.getElementById('tm-ztrend-active');
+        trendSvg.addEventListener('mousemove', function(ev) {
+          var rect = trendSvg.getBoundingClientRect();
+          if (!rect || rect.width <= 0 || !tm.dateKeys.length) return;
+          var svgX = ((ev.clientX - rect.left) / rect.width) * tm.w;
+          var ratio = Math.max(0, Math.min(1, (svgX - tm.padL) / Math.max(1, tm.plotW)));
+          var idx = Math.round(ratio * (tm.dateKeys.length - 1));
+          var colX = tm.padL + (idx / Math.max(1, tm.dateKeys.length - 1)) * tm.plotW;
+          if (tXhair) { tXhair.setAttribute('x1', colX.toFixed(1)); tXhair.setAttribute('x2', colX.toFixed(1)); tXhair.style.display = ''; }
+
+          var activeList = [];
+          var daySum = 0;
+          var dotsMarkup = '';
+          for (var s = 0; s < tm.seriesList.length; s++) {
+            var ser = tm.seriesList[s];
+            var v = ser.values[idx] || 0;
+            if (v > 0) {
+              daySum += v;
+              var pt = tm.seriesCoords[s][idx];
+              activeList.push({ label: ser.label, color: ser.color, val: v });
+              dotsMarkup +=
+                '<circle cx="' + pt[0].toFixed(1) + '" cy="' + pt[1].toFixed(1) + '" r="8" fill="' + ser.color + '" fill-opacity="0.18"/>' +
+                '<circle cx="' + pt[0].toFixed(1) + '" cy="' + pt[1].toFixed(1) + '" r="4.2" fill="var(--tm-card)" stroke="' + ser.color + '" stroke-width="2.3"/>';
+            }
+          }
+          if (tActive) tActive.innerHTML = dotsMarkup;
+          activeList.sort(function(a, b) { return b.val - a.val; });
+
+          var rowsHtml = activeList.length
+            ? activeList.map(function(row) {
+                return '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot" style="background:' + row.color + '"></i>' + escapeHtml(row.label) + '</span><span class="tm-z-tip-v">' + escapeHtml(fmtStatsTokens(row.val)) + '</span></div>';
+              }).join('')
+            : '<div class="tm-z-tip-row"><span class="tm-z-tip-k">' + escapeHtml(t('noData')) + '</span><span class="tm-z-tip-v">0</span></div>';
+
+          placeTip(ev,
+            '<div class="tm-z-tip-head"><span>' + escapeHtml(fmtShortDate(tm.dateKeys[idx])) + '</span><em>' + (daySum > 0 ? escapeHtml(t('sumLabel') + ' ' + fmtStatsTokens(daySum)) : '') + '</em></div>' +
+            rowsHtml
+          );
+        });
+        trendSvg.addEventListener('mouseleave', function() {
+          if (tXhair) tXhair.style.display = 'none';
+          if (tActive) tActive.innerHTML = '';
+          hideTip();
+        });
+      }
+
+      // 4. 模型用量 Donut 圆环图与右侧列表双向联动高亮 + 中心实时数值切换
+      var donutSvgEl = modalShadow.getElementById('tm-zdonut-svg');
+      var pieListEl = modalShadow.getElementById('tm-zpie-list');
+      if (donutSvgEl && donutChart.meta) {
+        var dm = donutChart.meta;
+        var dValEl = modalShadow.getElementById('tm-zdonut-val');
+        var dUnitEl = modalShadow.getElementById('tm-zdonut-unit');
+        function setActiveSlice(idx, ev, withTip) {
+          var slices = donutSvgEl.querySelectorAll('[data-z-slice]');
+          var rows = pieListEl ? pieListEl.querySelectorAll('[data-z-slice]') : [];
+          if (idx < 0 || !dm.slices[idx]) {
+            donutSvgEl.classList.remove('has-active');
+            slices.forEach(function(el) { el.classList.remove('active'); });
+            rows.forEach(function(el) { el.classList.remove('active'); });
+            if (dValEl) dValEl.textContent = dm.totalText;
+            if (dUnitEl) dUnitEl.textContent = dm.totalUnit;
+            hideTip();
+            return;
+          }
+          donutSvgEl.classList.add('has-active');
+          slices.forEach(function(el) { el.classList.toggle('active', Number(el.getAttribute('data-z-slice')) === idx); });
+          rows.forEach(function(el) { el.classList.toggle('active', Number(el.getAttribute('data-z-slice')) === idx); });
+          var cur = dm.slices[idx];
+          if (dValEl) dValEl.textContent = cur.valText;
+          if (dUnitEl) dUnitEl.textContent = cur.pctText;
+          if (withTip && ev) {
+            placeTip(ev,
+              '<div class="tm-z-tip-head"><span>' + escapeHtml(cur.label) + '</span><em>' + escapeHtml(cur.pctText) + '</em></div>' +
+              '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot" style="background:' + cur.color + '"></i>' + escapeHtml(t('colTotal')) + '</span><span class="tm-z-tip-v">' + escapeHtml(cur.valText + ' ' + t('tokensUnit')) + '</span></div>' +
+              (cur.avgTps != null ? '<div class="tm-z-tip-row"><span class="tm-z-tip-k">' + escapeHtml(t('colAvgTps')) + '</span><span class="tm-z-tip-v">' + Number(cur.avgTps).toFixed(1) + ' tok/s</span></div>' : '')
+            );
+          }
+        }
+        donutSvgEl.addEventListener('mousemove', function(ev) {
+          var attr = ev.target && ev.target.getAttribute ? ev.target.getAttribute('data-z-slice') : null;
+          if (attr === null) { setActiveSlice(-1); return; }
+          setActiveSlice(Number(attr), ev, true);
+        });
+        donutSvgEl.addEventListener('mouseleave', function() { setActiveSlice(-1); });
+        if (pieListEl) {
+          pieListEl.addEventListener('mousemove', function(ev) {
+            var row = ev.target && ev.target.closest ? ev.target.closest('[data-z-slice]') : null;
+            if (!row) { setActiveSlice(-1); return; }
+            setActiveSlice(Number(row.getAttribute('data-z-slice')), ev, false);
+          });
+          pieListEl.addEventListener('mouseleave', function() { setActiveSlice(-1); });
+        }
+      }
     }
 
     async function updatePrefs(patch) {

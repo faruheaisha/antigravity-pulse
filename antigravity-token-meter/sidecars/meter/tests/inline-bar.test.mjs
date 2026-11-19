@@ -221,7 +221,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.2',
+    version: '1.2.3',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -343,8 +343,15 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
   quotaChip.dispatchEvent({ type: 'click' });
   assert.equal(pop.classList.contains('open'), false);
 
-  // 确认代码包含 ZCode 风格使用统计弹窗（5 栏 KPI、52 周热力图、每日平滑趋势图与 Donut 圆环图）
-  assert.ok(code.includes('tm-z-kpis') && code.includes('tm-z-donut-svg') && code.includes('buildMonotoneSplinePath'));
+  // 确认代码包含 ZCode 风格使用统计弹窗（5 栏 KPI、52 周热力图、每日平滑趋势图、Donut 圆环图与实时互动浮窗/准星）
+  assert.ok(
+    code.includes('tm-z-kpis') &&
+    code.includes('tm-z-donut-svg') &&
+    code.includes('buildMonotoneSplinePath') &&
+    code.includes('tm-z-tip') &&
+    code.includes('tm-zcum-xhair') &&
+    code.includes('tm-ztrend-xhair')
+  );
 
   win.__agTokenMeterDispose();
 });
