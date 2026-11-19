@@ -198,6 +198,7 @@ export class LoopbackWebSocket extends EventEmitter {
       });
 
       sock.on('data', (chunk) => {
+        if (this.readyState >= 2) return;
         this._chunks.push(chunk);
         this._bufferedBytes += chunk.length;
 
@@ -350,6 +351,10 @@ export class LoopbackWebSocket extends EventEmitter {
         this._failProtocol(1009);
         return;
       }
+      if (opcode === 0x0 && this._fragBytes + len > MAX_MESSAGE_BYTES) {
+        this._failProtocol(1009);
+        return;
+      }
       if (this._bufferedBytes < offset + len) return;
 
       const raw = this._consume(offset + len);
@@ -362,7 +367,7 @@ export class LoopbackWebSocket extends EventEmitter {
           const code = payload.readUInt16BE(0);
           const validCode =
             (code >= 1000 && code <= 1003) ||
-            (code >= 1007 && code <= 1011) ||
+            (code >= 1007 && code <= 1014) ||
             (code >= 3000 && code <= 4999);
           if (!validCode) { this._failProtocol(1002); return; }
           if (payload.length > 2) {
@@ -391,12 +396,14 @@ export class LoopbackWebSocket extends EventEmitter {
         }
         if (fin) {
           if (opcode === 0x1) {
+            let text;
             try {
-              this.emit('message', utf8Strict.decode(payload));
+              text = utf8Strict.decode(payload);
             } catch {
               this._failProtocol(1007);
               return;
             }
+            this.emit('message', text);
           }
         } else {
           this._fragOpcode = opcode;
@@ -421,12 +428,14 @@ export class LoopbackWebSocket extends EventEmitter {
           this._fragParts = [];
           this._fragBytes = 0;
           if (op === 0x1) {
+            let text;
             try {
-              this.emit('message', utf8Strict.decode(full));
+              text = utf8Strict.decode(full);
             } catch {
               this._failProtocol(1007);
               return;
             }
+            this.emit('message', text);
           }
         }
       }

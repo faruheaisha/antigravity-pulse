@@ -28,7 +28,7 @@ import { buildInlineWidgetScript } from './src/ui/inline-bar.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
-const VERSION = String(PKG.version || '1.2.8');
+const VERSION = String(PKG.version || '1.2.9');
 const IS_HOST_SIDECAR = Boolean(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT);
 const IS_PREVIEW = process.argv.includes('--preview');
 
@@ -90,10 +90,26 @@ async function fetchUserStatusProjection() {
 }
 
 /**
- * 采集当前会话与统计快照。
- * 重要：若调用方显式指定了 conversationId 但找不到该会话，绝不回退到其他会话（杜绝串会话）。
+ * 统一过滤应当入账的新鲜事件：严格跳过早于历史导入水位线或已被 FIFO 驱逐的老记录，
+ * 并在缺少单步精确时间戳时检查会话创建时间，彻底防止续聊旧会话将历史消费双记到今天。
  */
-async function collectSnapshot({ conversationId = undefined } = {}) {
+function filterFreshLedgerEvents(events, { cutoffMs = 0, convCreatedMs = NaN } = {}) {
+  if (!Array.isArray(events) || events.length === 0) return [];
+  if (!Number.isFinite(cutoffMs) || cutoffMs <= 0) return events;
+  return events.filter((ev) => {
+    const t = Date.parse(ev.timestamp || '');
+    if (!Number.isFinite(t) || t <= cutoffMs) return false;
+    if (ev.hasExactTimestamp) return true;
+    return Number.isFinite(convCreatedMs) ? convCreatedMs > cutoffMs : false;
+  });
+}
+
+/**
+ * 采集当前会话与统计快照。
+ * 重要：若调用方显式指定了 conversationId 但找不到该会话，或 allowFallback=false（内嵌条新对话首页），
+ * 绝不回退到其他旧会话（杜绝串会话），但依然返回全局额度、今日/本月统计与偏好配置。
+ */
+async function collectSnapshot({ conversationId = undefined, allowFallback = true } = {}) {
   const flags = readPluginFlags(paths);
   if (!flags.enabled) {
     return { version: VERSION, connected: false, disabled: true, integration: bridge.status };
@@ -111,10 +127,11 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
   let connected = quotaFresh;
   let targetCid = explicitCid;
   let targetStatus = '';
+  let targetCreatedMs = NaN;
   let fallbackDate = new Date().toISOString();
-  let conversationUnavailable = invalidExplicit;
+  let conversationUnavailable = invalidExplicit || (!explicitCid && !allowFallback);
 
-  if (!invalidExplicit) {
+  if (!invalidExplicit && (explicitCid || allowFallback)) {
     try {
       const trajs = await lsClient.getAllTrajectories();
       const summaries = trajs?.trajectorySummaries || {};
@@ -124,8 +141,9 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
         if (Object.hasOwn(summaries, explicitCid)) {
           targetStatus = summaries[explicitCid]?.status || '';
           fallbackDate = summaries[explicitCid]?.lastModifiedTime || fallbackDate;
+          targetCreatedMs = Date.parse(summaries[explicitCid]?.createdTime || '');
         }
-      } else {
+      } else if (allowFallback) {
         const ranked = Object.entries(summaries).sort(([, a], [, b]) => {
           const aRun = a?.status === 'CASCADE_RUN_STATUS_RUNNING' ? 1 : 0;
           const bRun = b?.status === 'CASCADE_RUN_STATUS_RUNNING' ? 1 : 0;
@@ -136,6 +154,7 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
           targetCid = ranked[0][0];
           targetStatus = ranked[0][1]?.status || '';
           fallbackDate = ranked[0][1]?.lastModifiedTime || fallbackDate;
+          targetCreatedMs = Date.parse(ranked[0][1]?.createdTime || '');
         }
       }
     } catch {}
@@ -155,14 +174,15 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
       });
       if (!IS_PREVIEW && (!ownerLease || ownerLease.owned)) {
         try {
-          const importedUntilMs = await ledger.getImportedUntilMs();
-          const freshEvents = importedUntilMs > 0
-            ? computed.ledgerEvents.filter((ev) => {
-                const t = Date.parse(ev.timestamp || '');
-                if (!Number.isFinite(t)) return false;
-                return t > importedUntilMs;
-              })
-            : computed.ledgerEvents;
+          const [importedUntilMs, evictedUntilMs] = await Promise.all([
+            ledger.getImportedUntilMs(),
+            ledger.getEvictedUntilMs(),
+          ]);
+          const cutoffMs = Math.max(importedUntilMs, evictedUntilMs);
+          const freshEvents = filterFreshLedgerEvents(computed.ledgerEvents, {
+            cutoffMs,
+            convCreatedMs: targetCreatedMs,
+          });
           if (freshEvents.length > 0) {
             await ledger.ingest(freshEvents);
           }
@@ -271,8 +291,12 @@ if (IS_HOST_SIDECAR) {
       const labelMap = projection?.labelMap || new Map();
       const trajs = await lsClient.getAllTrajectories();
       const summaries = trajs?.trajectorySummaries || {};
-      const importedUntilMs = await ledger.getImportedUntilMs();
-      const cutoffMs = Math.max(Date.now() - 120 * 86400 * 1000, importedUntilMs);
+      const [importedUntilMs, evictedUntilMs] = await Promise.all([
+        ledger.getImportedUntilMs(),
+        ledger.getEvictedUntilMs(),
+      ]);
+      const ledgerCutoffMs = Math.max(importedUntilMs, evictedUntilMs);
+      const cutoffMs = Math.max(Date.now() - 120 * 86400 * 1000, ledgerCutoffMs);
 
       const candidates = Object.entries(summaries)
         .filter(([cid, meta]) => {
@@ -296,14 +320,10 @@ if (IS_HOST_SIDECAR) {
             fallbackDate: meta?.lastModifiedTime || new Date().toISOString(),
           });
           const convCreatedMs = Date.parse(meta?.createdTime || '');
-          const events = importedUntilMs > 0
-            ? computed.ledgerEvents.filter((ev) => {
-                const t = Date.parse(ev.timestamp || '');
-                if (!Number.isFinite(t) || t <= importedUntilMs) return false;
-                if (ev.hasExactTimestamp) return true;
-                return Number.isFinite(convCreatedMs) ? convCreatedMs > importedUntilMs : false;
-              })
-            : computed.ledgerEvents;
+          const events = filterFreshLedgerEvents(computed.ledgerEvents, {
+            cutoffMs: ledgerCutoffMs,
+            convCreatedMs,
+          });
           if (events.length > 0) {
             await ledger.ingest(events);
           }
@@ -319,6 +339,20 @@ if (IS_HOST_SIDECAR) {
   }
 
   let claimRetryTimer = null;
+  let isShuttingDown = false;
+  const scheduleClaimRetry = () => {
+    if (claimRetryTimer || isShuttingDown) return;
+    claimRetryTimer = setInterval(() => {
+      void (async () => {
+        if (isShuttingDown) return;
+        if (await ownerLease.claim()) {
+          activateOwnership();
+        }
+      })();
+    }, 4000);
+    claimRetryTimer.unref?.();
+  };
+
   const activateOwnership = () => {
     if (claimRetryTimer) {
       clearInterval(claimRetryTimer);
@@ -329,6 +363,8 @@ if (IS_HOST_SIDECAR) {
     bridge.start();
     ownerLease.startHeartbeat(() => {
       void bridge.detachAll();
+      // 若因瞬时 IO 冲突失锁且并非关机退出，自动重新进入争锁自愈周期
+      scheduleClaimRetry();
     });
     if (!backfillTimer) {
       backfillTimer = setTimeout(() => {
@@ -343,18 +379,12 @@ if (IS_HOST_SIDECAR) {
     activateOwnership();
   } else {
     // 若快速重启时旧租约尚未过 TTL，定期重试接管，避免整个生命周期无法挂载
-    claimRetryTimer = setInterval(() => {
-      void (async () => {
-        if (await ownerLease.claim()) {
-          activateOwnership();
-        }
-      })();
-    }, 4000);
-    claimRetryTimer.unref?.();
+    scheduleClaimRetry();
   }
 
   let shutdownPromise = null;
   const shutdown = () => {
+    isShuttingDown = true;
     if (!shutdownPromise) {
       shutdownPromise = (async () => {
         const guard = setTimeout(() => process.exit(0), 8000);
@@ -374,7 +404,8 @@ if (IS_HOST_SIDECAR) {
   }
 } else {
   // 显式 --preview 只读本地预览（要求一次性会话 Token 与严格来源校验）
-  const port = Number(process.env.AG_TM_PORT || 17920);
+  const rawPort = Number(process.env.AG_TM_PORT || 17920);
+  const port = Number.isInteger(rawPort) && rawPort >= 0 && rawPort <= 65535 ? rawPort : 17920;
   const previewToken = randomBytes(16).toString('hex');
 
   const server = createServer((req, res) => {
@@ -385,7 +416,14 @@ if (IS_HOST_SIDECAR) {
         res.end();
         return;
       }
-      const url = new URL(req.url || '/', `http://127.0.0.1:${port}`);
+      let url;
+      try {
+        url = new URL(req.url || '/', `http://${host}`);
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end('{"error":"bad_request"}');
+        return;
+      }
       const origin = req.headers.origin;
       if (origin && origin !== `http://${host}`) {
         res.writeHead(403);
@@ -442,7 +480,7 @@ if (IS_HOST_SIDECAR) {
       res.end('Not found');
     })().catch(() => {
       if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end('{"error":"internal_error"}');
+      if (!res.writableEnded) res.end('{"error":"internal_error"}');
     });
   });
 

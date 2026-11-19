@@ -58,9 +58,26 @@ function parseArgs(argv) {
   return opts;
 }
 
+function parseTimestampMs(raw) {
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : NaN;
+  }
+  if (typeof raw === 'string') {
+    const s = raw.trim();
+    if (!s) return NaN;
+    if (/^\d{10,15}$/.test(s)) {
+      const n = Number(s);
+      return Number.isFinite(n) && n > 0 ? Math.round(n) : NaN;
+    }
+    const ms = Date.parse(s);
+    return Number.isFinite(ms) && ms > 0 ? ms : NaN;
+  }
+  return NaN;
+}
+
 function printHelp() {
   console.log([
-    'Antigravity TokenMeter 历史用量迁移工具 (v1.2.8)',
+    'Antigravity TokenMeter 历史用量迁移工具 (v1.2.9)',
     '',
     '用法:',
     '  node scripts/import_legacy_usage.mjs [选项]',
@@ -133,7 +150,7 @@ export function buildLegacyImportBundle(sourceDir, { replaceOverlap = true } = {
           : [];
       for (const rec of list) {
         if (!rec || typeof rec !== 'object' || typeof rec.id !== 'string' || !rec.id.trim()) continue;
-        const atMs = Number(rec.at ?? Date.parse(rec.timestamp || ''));
+        const atMs = parseTimestampMs(rec.at ?? rec.timestamp);
         if (!Number.isFinite(atMs) || atMs <= 0) continue;
 
         const input = safeInt(rec.uncached ?? rec.inputTokens) + safeInt(rec.cacheWrite ?? rec.cacheWriteTokens);
@@ -301,26 +318,32 @@ async function main() {
   }
 
   const sidecarRunning = hasActiveOwnerLease(opts.target);
-  const ledger = new UsageLedger(opts.target);
-  const res = await ledger.applyImportBundle(scan.bundle);
-  const snap = await ledger.snapshot();
-
   const pendingPath = join(dirname(opts.target), 'pending-import.json');
   if (sidecarRunning) {
+    // 严格遵守单写者租约契约：运行中仅原子投递 pending-import.json，由新启动的 sidecar 统一吸纳，绝不并发直写 ledger-v1.json
     const tmpPending = `${pendingPath}.${process.pid}.tmp`;
     writeFileSync(tmpPending, JSON.stringify(scan.bundle), { encoding: 'utf8', mode: 0o600 });
     renameSync(tmpPending, pendingPath);
-    console.log('[TokenMeter] 检测到 Antigravity sidecar 正在运行，已额外写入 pending-import.json 保护队列。');
-    console.log('[TokenMeter] 重启 Antigravity 加载 v1.2.8 后将自动原子吸纳，彻底防止旧进程刷盘覆盖。');
-  } else if (existsSync(pendingPath)) {
+    console.log('[TokenMeter] 检测到 Antigravity sidecar 正在运行，已安全写入 pending-import.json 保护队列（未并发修改运行中的账本）。');
+    console.log('[TokenMeter] 重启 Antigravity 加载 v1.2.9 后将自动原子吸纳并归档。');
+    return;
+  }
+
+  const ledger = new UsageLedger(opts.target);
+  const res = await ledger.applyImportBundle(scan.bundle);
+  const snap = await ledger.snapshot();
+  if (res.applied && existsSync(pendingPath)) {
     try { unlinkSync(pendingPath); } catch {}
   }
 
   console.log(
     res.applied
       ? `[TokenMeter] 迁移完成（重叠基线替换: ${res.replacedOverlap ? '是' : '否'}）。`
-      : `[TokenMeter] 跳过重复导入（原因: ${res.reason}）。`
+      : `[TokenMeter] 未写入账本（原因: ${res.reason}）。`
   );
+  if (!res.applied && res.reason === 'corrupted_ledger') {
+    process.exitCode = 1;
+  }
   console.log(
     `[TokenMeter] 账本最新快照 -> 今日 ${fmtTokens(snap.todayTokens)} | 近 7 天 ${fmtTokens(snap.weekTokens)} | 本月 ${fmtTokens(snap.monthTokens)} | 累计 ${fmtTokens(snap.totalTokens)}`
   );

@@ -98,6 +98,29 @@ test('CdpInlineBridge 使用 Isolated World 隔离，导航切换文档代次后
   const evalAfter = s.calls.filter((c) => c.method === 'Runtime.evaluate').length;
   assert.equal(evalAfter, evalBefore);
 
+  // 确认导航清零 worldContextId 后，收到 Runtime.executionContextCreated 能立即恢复上下文并带 allowFallback:false 响应
+  const capturedInputs = [];
+  bridge.getSnapshot = async (inp) => {
+    capturedInputs.push(inp);
+    return { connected: true };
+  };
+  await bridge._handleEvent(s, {
+    method: 'Runtime.executionContextCreated',
+    params: {
+      context: {
+        id: 999,
+        name: 'AntigravityTokenMeterWorld',
+        auxData: { isDefault: false, frameId: 'main-frame' },
+      },
+    },
+  });
+  await bridge._handleEvent(s, {
+    method: 'Runtime.bindingCalled',
+    params: { name: bridge.bindingName, executionContextId: 999, payload: JSON.stringify({ id: 2, type: 'snapshot', input: { conversationId: null } }) },
+  });
+  assert.equal(capturedInputs.length, 1);
+  assert.deepEqual(capturedInputs[0], { conversationId: null, allowFallback: false });
+
   await bridge.stop();
   assert.equal(s.closed, true);
 });

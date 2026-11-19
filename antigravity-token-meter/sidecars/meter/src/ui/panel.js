@@ -23,6 +23,21 @@
     return d[code] || d.cdp_unreachable || String(code || '');
   }
   function safeInt(v) { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.round(n) : 0; }
+  function fmtFixed(v, digits) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n.toFixed(digits) : null;
+  }
+  function parseBaseDate(todayDate) {
+    if (typeof todayDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(todayDate)) {
+      const [y, m, d] = todayDate.split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+      if (Number.isFinite(dt.getTime())) return dt;
+    }
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    return now;
+  }
   function fmtTokens(n) {
     const v = safeInt(n);
     if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
@@ -189,12 +204,13 @@
     renderThemeSeg();
   }
 
-  function renderHeatmap(days) {
+  function renderHeatmap(days, todayDate) {
     const dayMap = Object.create(null);
     (days || []).forEach((d) => {
       if (d && d.date) dayMap[d.date] = safeInt(d.total);
     });
-    const now = new Date();
+    const now = parseBaseDate(todayDate);
+    const todayDow = now.getDay(); // 0=周日..6=周六，按真实星期对齐不跨天错位
     const totalCols = 22;
     const cell = 11, gap = 3, step = cell + gap;
     const w = totalCols * step - gap;
@@ -203,8 +219,10 @@
     let visibleMax = 1;
     for (let c = 0; c < totalCols; c++) {
       for (let r = 0; r < 7; r++) {
+        const offsetDays = (totalCols - 1 - c) * 7 + (todayDow - r);
+        if (offsetDays < 0) continue;
         const dt = new Date(now);
-        dt.setDate(dt.getDate() - ((totalCols - 1 - c) * 7 + (6 - r)));
+        dt.setDate(dt.getDate() - offsetDays);
         const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
         const val = dayMap[key] || 0;
         if (val > visibleMax) visibleMax = val;
@@ -253,9 +271,9 @@
       banner.textContent = (ok ? '' : '⚠ ') + tDiag(diag.code || diag.state);
 
       const c = data.conversation || {};
-      const heroSpeed = c.latestTps != null ? Number(c.latestTps).toFixed(1) : (c.tps != null ? Number(c.tps).toFixed(1) : '--');
+      const heroSpeed = fmtFixed(c.latestTps, 1) || fmtFixed(c.tps, 1) || '--';
       document.getElementById('k-latest').textContent = heroSpeed;
-      document.getElementById('k-session').textContent = c.tps != null ? `${Number(c.tps).toFixed(1)}` : '--';
+      document.getElementById('k-session').textContent = fmtFixed(c.tps, 1) || '--';
       document.getElementById('k-cache').textContent = fmtPct(c.cacheHitRate);
       const ctxFrac = c.context ? c.context.usedFraction : null;
       syncContextRing(document.getElementById('k-ctx-ring'), ctxFrac);
@@ -297,8 +315,8 @@
         uMetaEl.textContent = metaParts.join(' · ');
       }
       const heatEl = document.getElementById('heatmap');
-      if (heatEl) heatEl.innerHTML = renderHeatmap(usage.days);
-      document.getElementById('today-sum').textContent = `${t('month')} ${fmtTokens(usage.monthTokens)}`;
+      if (heatEl) heatEl.innerHTML = renderHeatmap(usage.days, usage.todayDate);
+      document.getElementById('today-sum').textContent = `${t('lifetime')} ${fmtTokens(usage.totalTokens)}`;
       const ranks = usage.modelRank || [];
       const tbody = document.getElementById('rank-body');
       tbody.textContent = '';
@@ -317,7 +335,7 @@
           for (const cellText of [
             String(m.model || ''),
             fmtTokens(m.totalTokens),
-            m.avgTps != null ? Number(m.avgTps).toFixed(1) : '--',
+            fmtFixed(m.avgTps, 1) || '--',
             String(safeInt(m.requests)),
           ]) {
             const td = document.createElement('td');

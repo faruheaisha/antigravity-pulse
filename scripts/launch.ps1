@@ -14,10 +14,11 @@ function Find-AntigravityExe {
     if ($env:ProgramFiles) {
         $candidates += (Join-Path $env:ProgramFiles 'Antigravity\Antigravity.exe')
     }
-    # 从 Windows 卸载注册表读取真实安装位置（比盲扫任意 .lnk 更可靠）
+    # 从 Windows 卸载注册表读取真实安装位置（含 64 位与 32 位视图，安全去除首尾引号）
     $regRoots = @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*'
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
     )
     foreach ($root in $regRoots) {
         try {
@@ -25,10 +26,11 @@ function Find-AntigravityExe {
                 $_.DisplayName -match '^Antigravity\b'
             } | ForEach-Object {
                 if ($_.InstallLocation) {
-                    $candidates += (Join-Path $_.InstallLocation 'Antigravity.exe')
+                    $cleanLoc = ([string]$_.InstallLocation).Trim().Trim('"')
+                    if ($cleanLoc) { $candidates += (Join-Path $cleanLoc 'Antigravity.exe') }
                 }
                 if ($_.DisplayIcon) {
-                    $iconPath = ($_.DisplayIcon -replace ',.*$', '').Trim('"')
+                    $iconPath = ($_.DisplayIcon -replace ',.*$', '').Trim().Trim('"')
                     if ($iconPath -match '(?i)\\Antigravity\.exe$') { $candidates += $iconPath }
                 }
             }

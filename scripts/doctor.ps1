@@ -14,12 +14,11 @@ if (-not $Json) {
 
 $HomeDir = if ($env:AG_TEST_HOME) { $env:AG_TEST_HOME } else { $env:USERPROFILE }
 $AppDataDir = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $HomeDir 'AppData\Roaming' }
-$LocalDir = if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HomeDir 'AppData\Local' }
+$LocalDir = if ($env:AG_TEST_LOCAL) { $env:AG_TEST_LOCAL } elseif ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $HomeDir 'AppData\Local' }
 
 $PluginDir = Join-Path $HomeDir '.gemini\config\plugins\antigravity-token-meter'
 $ConfigFile = Join-Path $HomeDir '.gemini\config\config.json'
 $SettingsFile = Join-Path $LocalDir 'AntigravityTokenMeter\settings.json'
-$ActivePortFile = Join-Path $AppDataDir 'Antigravity\DevToolsActivePort'
 $StatusFile = Join-Path $HomeDir '.gemini\antigravity\sidecar_data\antigravity-token-meter\meter\data\integration-status.json'
 
 $checks = @()
@@ -58,41 +57,64 @@ else { Add-Check '2/6 插件注册' 'fail' 'config.json 中插件未启用' '彻
 if ($sidecarEnabled) { Add-Check '3/6 Sidecar 启用' 'pass' 'config.json 已启用 sidecars["antigravity-token-meter/meter"]' }
 else { Add-Check '3/6 Sidecar 启用' 'fail' 'config.json 未启用 sidecar 进程' '彻底退出 Antigravity 后运行新版安装器补齐 sidecars 启用项。' }
 
-# 读取实验内嵌开关
+# 读取实验内嵌开关与自定义 Profile 路径
 $inlineWanted = $false
+$customProfile = $null
 if (Test-Path -LiteralPath $SettingsFile -PathType Leaf) {
     try {
         $stSet = ([System.IO.File]::ReadAllText($SettingsFile, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF)) | ConvertFrom-Json
         if ($stSet.inline -eq $true) { $inlineWanted = $true }
+        if ($stSet.profile -is [string] -and -not [string]::IsNullOrWhiteSpace($stSet.profile)) { $customProfile = $stSet.profile.Trim() }
     } catch {}
 }
 
-# 4. 运行中主进程检查
+$profileCandidates = @()
+if ($env:AG_TM_PROFILE) { $profileCandidates += $env:AG_TM_PROFILE }
+if ($customProfile) { $profileCandidates += $customProfile }
+$profileCandidates += (Join-Path $AppDataDir 'Antigravity')
+$ActivePortFile = $null
+foreach ($pDir in ($profileCandidates | Select-Object -Unique)) {
+    $cand = Join-Path $pDir 'DevToolsActivePort'
+    if (Test-Path -LiteralPath $cand -PathType Leaf) {
+        $ActivePortFile = $cand
+        break
+    }
+}
+
+# 4. 运行中主进程检查（兼容普通权限查询管理员进程 CommandLine 为空的场景）
+$procQueryOk = $true
+$allProcs = @()
 $guiProcs = @()
 try {
-    $guiProcs = @(Get-CimInstance Win32_Process -Filter "Name='Antigravity.exe'" -ErrorAction Stop | Where-Object {
-        $_.CommandLine -notmatch 'sidecar_sdk|(?:^|\s)--type='
+    $allProcs = @(Get-CimInstance Win32_Process -Filter "Name='Antigravity.exe'" -ErrorAction Stop)
+    $guiProcs = @($allProcs | Where-Object {
+        $_.CommandLine -and $_.CommandLine -notmatch 'sidecar_sdk|(?:^|\s)--type='
     })
 } catch {
+    $procQueryOk = $false
     Add-Check '4/6 主进程参数' 'fail' '无法查询本机进程列表（可能权限不足）'
 }
 
-if ($guiProcs.Count -eq 0) {
-    Add-Check '4/6 主进程参数' 'warn' '未检测到运行中的 Antigravity 主界面' '请双击「启动Antigravity(带Token监控).bat」启动客户端。'
-} elseif ($guiProcs | Where-Object { $_.CommandLine -match '(?:^|\s)--remote-debugging-port=\d+' }) {
-    Add-Check '4/6 主进程参数' 'pass' 'Antigravity 主进程已携带 --remote-debugging-port 启动参数'
-} elseif (-not $inlineWanted) {
-    Add-Check '4/6 主进程参数' 'pass' '当前为纯侧边栏模式（未开启实验内嵌，无需调试端口）'
-} else {
-    Add-Check '4/6 主进程参数' 'fail' 'Antigravity 主进程未携带 --remote-debugging-port=0' '请右键系统托盘彻底退出 Antigravity，再用「启动Antigravity(带Token监控).bat」启动。'
+if ($procQueryOk) {
+    if ($allProcs.Count -eq 0) {
+        Add-Check '4/6 主进程参数' 'warn' '未检测到运行中的 Antigravity 主界面' '请双击「启动Antigravity(带Token监控).bat」启动客户端。'
+    } elseif ($guiProcs.Count -eq 0 -and ($allProcs | Where-Object { [string]::IsNullOrEmpty($_.CommandLine) }).Count -gt 0) {
+        Add-Check '4/6 主进程参数' 'warn' '检测到高权限运行中的 Antigravity，当前普通终端无法读取其启动命令行' '如需完整核验命令行参数，请以管理员身份运行本诊断工具（可参考下方第 5、6 项实际连接状态）。'
+    } elseif ($guiProcs | Where-Object { $_.CommandLine -match '(?:^|\s)--remote-debugging-port=\d+' }) {
+        Add-Check '4/6 主进程参数' 'pass' 'Antigravity 主进程已携带 --remote-debugging-port 启动参数'
+    } elseif (-not $inlineWanted) {
+        Add-Check '4/6 主进程参数' 'pass' '当前为纯侧边栏模式（未开启实验内嵌，无需调试端口）'
+    } else {
+        Add-Check '4/6 主进程参数' 'fail' 'Antigravity 主进程未携带 --remote-debugging-port=0' '请右键系统托盘彻底退出 Antigravity，再用「启动Antigravity(带Token监控).bat」启动。'
+    }
 }
 
 # 5. DevToolsActivePort 严格端口校验与无代理/禁重定向连通性
 if (-not $inlineWanted) {
     Add-Check '5/6 本地调试端口' 'pass' '纯侧边栏模式跳过 CDP 端口检测'
-} elseif (Test-Path -LiteralPath $ActivePortFile -PathType Leaf) {
+} elseif ($ActivePortFile -and (Test-Path -LiteralPath $ActivePortFile -PathType Leaf)) {
     try {
-        $lines = Get-Content -LiteralPath $ActivePortFile -ErrorAction Stop
+        $lines = @(Get-Content -LiteralPath $ActivePortFile -ErrorAction Stop)
         $portStr = if ($lines.Count -gt 0) { [string]$lines[0] } else { '' }
         $portStr = $portStr.Trim()
         if ($portStr -notmatch '^[1-9]\d{0,4}$' -or [int]$portStr -gt 65535) {

@@ -58,6 +58,27 @@ export function buildInlineWidgetScript() {
     var resizeDebounce = null;
     var pollTimer = null;
     var mountDebounce = null;
+    var scrollRaf = 0;
+
+    function fmtFixed(v, digits) {
+      if (v === null || v === undefined || v === '') return null;
+      var n = Number(v);
+      return Number.isFinite(n) ? n.toFixed(digits) : null;
+    }
+
+    /**
+     * 优先以服务端返回的本地日期键（YYYY-MM-DD）作为图表日历基准，避免跨零点前后端 1 秒差导致双柱亮蓝或错位。
+     */
+    function parseBaseDate(todayDate) {
+      if (typeof todayDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(todayDate)) {
+        var parts = todayDate.split('-').map(Number);
+        var d = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0, 0);
+        if (Number.isFinite(d.getTime())) return d;
+      }
+      var now = new Date();
+      now.setHours(12, 0, 0, 0);
+      return now;
+    }
 
     function t(key) {
       var lang = state.prefs && state.prefs.language === 'en' ? 'en' : 'zh-CN';
@@ -181,7 +202,9 @@ export function buildInlineWidgetScript() {
       var qText = qParts.single !== undefined ? qParts.single : (qParts.left + '/' + qParts.right);
       var parts = ['✦ TokenMeter'];
       if (conv.model) parts.push(String(conv.model));
-      if (conv.latestTps != null) parts.push(Number(conv.latestTps).toFixed(1) + ' tok/s' + (conv.tps != null ? ' (avg ' + Number(conv.tps).toFixed(1) + ')' : ''));
+      var latestFixed = fmtFixed(conv.latestTps, 1);
+      var avgFixed = fmtFixed(conv.tps, 1);
+      if (latestFixed !== null) parts.push(latestFixed + ' tok/s' + (avgFixed !== null ? ' (avg ' + avgFixed + ')' : ''));
       if (conv.cacheHitRate != null) parts.push('Cache ' + fmtPct(conv.cacheHitRate));
       if (conv.context && conv.context.usedFraction != null) parts.push('Ctx ' + fmtPct(conv.context.usedFraction));
       if (qText !== '--') parts.push('Quota ' + qText);
@@ -291,8 +314,8 @@ export function buildInlineWidgetScript() {
         if (innerBtns.length > 0) {
           for (var j = 0; j < innerBtns.length; j++) {
             var br = innerBtns[j].getBoundingClientRect();
-            var relRight = br.right - fRect.left;
-            if (relRight > leftUsed && relRight < fw - rightUsed) leftUsed = relRight;
+            var relRight = Math.min(br.right - fRect.left, fw - rightUsed);
+            if (relRight > leftUsed) leftUsed = relRight;
           }
         } else {
           var cr = ch.getBoundingClientRect();
@@ -573,7 +596,7 @@ export function buildInlineWidgetScript() {
       (days || []).forEach(function(d) {
         if (d && d.date) dayMap[d.date] = safeInt(d.total);
       });
-      var now = new Date();
+      var now = parseBaseDate(todayDate);
       var bars = [];
       var maxVal = 1;
       for (var i = 13; i >= 0; i--) {
@@ -582,7 +605,7 @@ export function buildInlineWidgetScript() {
         var key = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
         var v = dayMap[key] || 0;
         if (v > maxVal) maxVal = v;
-        bars.push({ key: key, val: v, isToday: key === todayDate || i === 0 });
+        bars.push({ key: key, val: v, isToday: todayDate ? key === todayDate : i === 0 });
       }
       var w = 278, h = 42, slot = w / bars.length, bw = Math.max(8, slot - 5);
       var rects = bars.map(function(b, idx) {
@@ -620,9 +643,13 @@ export function buildInlineWidgetScript() {
       var isRunning = Boolean(conv && conv.running);
 
       if (tab === 'speed') {
-        var heroNum = conv && conv.latestTps != null ? Number(conv.latestTps).toFixed(1) : (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--');
+        var heroNum = fmtFixed(conv && conv.latestTps, 1) || fmtFixed(conv && conv.tps, 1) || '--';
         var measuredText = conv ? (safeInt(conv.measuredRequests) + ' / ' + safeInt(conv.requests)) : '--';
-        var streamText = conv && conv.streamingSeconds > 0 ? Number(conv.streamingSeconds).toFixed(1) + 's' : '--';
+        var streamFixed = conv && conv.streamingSeconds > 0 ? fmtFixed(conv.streamingSeconds, 1) : null;
+        var streamText = streamFixed !== null ? streamFixed + 's' : '--';
+        var sessionSpeedText = fmtFixed(conv && conv.tps, 1) || '--';
+        var ttftFixed = fmtFixed(conv && conv.ttftSeconds, 2);
+        var ttftText = ttftFixed !== null ? ttftFixed + 's' : '--';
         return {
           title: t('cardSpeed'),
           badge: isRunning ? t('generating') : '',
@@ -634,8 +661,8 @@ export function buildInlineWidgetScript() {
             '</div>' +
             '<div class="tm-spark-wrap">' + buildSparklineSvg(conv && conv.sparkline) + '</div>' +
             '<div class="tm-sub-strip tm-sub-strip-tight">' +
-              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('sessionSpeed')) + '</div><div class="tm-sub-v">' + (conv && conv.tps != null ? Number(conv.tps).toFixed(1) : '--') + '</div></div>' +
-              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('ttft')) + '</div><div class="tm-sub-v">' + (conv && conv.ttftSeconds != null ? Number(conv.ttftSeconds).toFixed(2) + 's' : '--') + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('sessionSpeed')) + '</div><div class="tm-sub-v">' + escapeHtml(sessionSpeedText) + '</div></div>' +
+              '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('ttft')) + '</div><div class="tm-sub-v">' + escapeHtml(ttftText) + '</div></div>' +
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('measuredReq')) + '</div><div class="tm-sub-v">' + escapeHtml(measuredText) + '</div></div>' +
             '</div>',
         };
@@ -664,7 +691,7 @@ export function buildInlineWidgetScript() {
         var ctxFrac = ctx ? ctx.usedFraction : null;
         var ctxPct = typeof ctxFrac === 'number' && Number.isFinite(ctxFrac) ? Math.round(Math.max(0, Math.min(1, ctxFrac)) * 100) : 0;
         var isEnCtx = state.prefs && state.prefs.language === 'en';
-        var turnsText = ctx && ctx.estimatedTurnsLeft
+        var turnsText = ctx && typeof ctx.estimatedTurnsLeft === 'number' && Number.isFinite(ctx.estimatedTurnsLeft)
           ? (isEnCtx ? (t('turnsLeft') + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')) : (t('turnsLeft') + ' ' + ctx.estimatedTurnsLeft + ' ' + t('turnsUnit')))
           : '';
         return {
@@ -788,8 +815,8 @@ export function buildInlineWidgetScript() {
           var lbl = '', val = '--';
           if (k === 'speed') {
             lbl = t('cardSpeed');
-            var sp = conv && (conv.latestTps != null ? conv.latestTps : conv.tps);
-            val = sp != null ? Number(sp).toFixed(1) + ' ' + t('speedUnit') : '--';
+            var spFixed = fmtFixed(conv && (conv.latestTps != null ? conv.latestTps : conv.tps), 1);
+            val = spFixed !== null ? spFixed + ' ' + t('speedUnit') : '--';
           } else if (k === 'cache') {
             lbl = t('cacheHit');
             val = fmtPct(conv && conv.cacheHitRate);
@@ -1169,7 +1196,7 @@ export function buildInlineWidgetScript() {
       (usage.days || []).forEach(function(d) {
         if (d && d.date) dayMap[d.date] = safeInt(d.total);
       });
-      var now = new Date();
+      var now = parseBaseDate(usage && usage.todayDate);
       var todayDow = now.getDay(); // 0=Sun..6=Sat
 
       if (mode === 'weekly') {
@@ -1230,10 +1257,12 @@ export function buildInlineWidgetScript() {
           series.push({ key: ck, delta: delta, val: running, month: cd.getMonth() + 1 });
         }
         var cw = 725, ch = 114, padL = 52, padR = 12, padT = 8, padB2 = 18;
-        var maxC = Math.max(1, series.length ? series[series.length - 1].val : 1);
+        var rawMaxC = series.length ? series[series.length - 1].val : 0;
+        var maxC = Math.max(1, rawMaxC);
+        var topTickText = rawMaxC > 0 ? fmtStatsTokens(rawMaxC) : '0';
         for (var si = 0; si < series.length; si++) {
           var px = padL + (si / Math.max(1, series.length - 1)) * (cw - padL - padR);
-          var py = padT + (1 - series[si].val / maxC) * (ch - padT - padB2);
+          var py = rawMaxC > 0 ? (padT + (1 - series[si].val / maxC) * (ch - padT - padB2)) : (ch - padB2);
           cumPts.push([px, py]);
         }
         var linePath = buildMonotoneSplinePath(cumPts);
@@ -1254,7 +1283,7 @@ export function buildInlineWidgetScript() {
           html: '<svg class="tm-z-svg tm-z-interactive" id="tm-zcum-svg" viewBox="0 0 ' + cw + ' ' + ch + '" width="100%" preserveAspectRatio="xMidYMid meet">' +
             '<defs><linearGradient id="tm-zcum-grad" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--tm-z-blue)" stop-opacity="0.22"/><stop offset="100%" stop-color="var(--tm-z-blue)" stop-opacity="0.01"/></linearGradient></defs>' +
             '<line x1="' + padL + '" y1="' + baseY + '" x2="' + (cw - padR) + '" y2="' + baseY + '" stroke="var(--tm-hairline)"/>' +
-            '<text x="' + (padL - 6) + '" y="' + (padT + 6) + '" text-anchor="end" class="tm-z-ax">' + escapeHtml(fmtStatsTokens(maxC)) + '</text>' +
+            '<text x="' + (padL - 6) + '" y="' + (padT + 6) + '" text-anchor="end" class="tm-z-ax">' + escapeHtml(topTickText) + '</text>' +
             '<text x="' + (padL - 6) + '" y="' + (baseY + 2) + '" text-anchor="end" class="tm-z-ax">0</text>' +
             '<path d="' + areaPath + '" fill="url(#tm-zcum-grad)" pointer-events="none"/>' +
             '<path d="' + linePath + '" fill="none" stroke="var(--tm-z-blue)" stroke-width="2" stroke-linecap="round" pointer-events="none"/>' +
@@ -1337,10 +1366,11 @@ export function buildInlineWidgetScript() {
       (usage.days || []).forEach(function(d) {
         if (d && d.date) daysObj[d.date] = d;
       });
-      var now = new Date();
+      var now = parseBaseDate(usage && usage.todayDate);
       var dateKeys = [];
       var modelTotals = Object.create(null);
       var rangeTotal = 0;
+      var rangeRequests = 0;
 
       for (var i = rangeDays - 1; i >= 0; i--) {
         var dt = new Date(now);
@@ -1350,6 +1380,7 @@ export function buildInlineWidgetScript() {
         var rec = daysObj[key];
         if (rec) {
           rangeTotal += safeInt(rec.total);
+          rangeRequests += safeInt(rec.requests);
           if (rec.byModel && typeof rec.byModel === 'object') {
             Object.keys(rec.byModel).forEach(function(m) {
               var v = safeInt(rec.byModel[m]);
@@ -1377,15 +1408,38 @@ export function buildInlineWidgetScript() {
         })
         .sort(function(a, b) { return b.totalTokens - a.totalTokens; });
 
-      // 若旧账本某日无 byModel，则回退使用全局 modelRank 防止空白
-      if (ranked.length === 0 && Array.isArray(usage.modelRank) && usage.modelRank.length > 0) {
+      // 仅当该时间范围确实有消费但旧账本缺少 byModel 细分时回退；若本时间段本就为 0 则诚实显示无数据，不误展全历史
+      if (ranked.length === 0 && rangeTotal > 0 && Array.isArray(usage.modelRank) && usage.modelRank.length > 0) {
         ranked = usage.modelRank.slice(0, 8).map(function(m) {
           return { model: m.model, totalTokens: safeInt(m.totalTokens), avgTps: m.avgTps, requests: safeInt(m.requests) };
         });
-        rangeTotal = ranked.reduce(function(acc, r) { return acc + r.totalTokens; }, 0);
       }
 
-      return { dateKeys: dateKeys, daysObj: daysObj, ranked: ranked, rangeTotal: rangeTotal };
+      // 判断 Top 5 之外是否还存在长尾模型（供趋势图与图例栏保持一致）
+      var top5 = ranked.slice(0, 5);
+      var hasOtherInRange = false;
+      for (var di = 0; di < dateKeys.length; di++) {
+        var rDay = daysObj[dateKeys[di]];
+        if (!rDay) continue;
+        var sumTop5 = 0;
+        for (var ti = 0; ti < top5.length; ti++) {
+          var mn = top5[ti].model;
+          if (rDay.byModel && Object.hasOwn(rDay.byModel, mn)) sumTop5 += safeInt(rDay.byModel[mn]);
+        }
+        if (safeInt(rDay.total) - sumTop5 > 0) {
+          hasOtherInRange = true;
+          break;
+        }
+      }
+
+      return {
+        dateKeys: dateKeys,
+        daysObj: daysObj,
+        ranked: ranked,
+        rangeTotal: rangeTotal,
+        rangeRequests: rangeRequests,
+        hasOtherInRange: hasOtherInRange,
+      };
     }
 
     /**
@@ -1434,11 +1488,27 @@ export function buildInlineWidgetScript() {
         sliceMeta.push({ label: slices[0].label, valText: fmtStatsTokens(slices[0].totalTokens), pctText: '100%', color: slices[0].color, avgTps: slices[0].avgTps });
         pathsHtml = '<circle cx="' + cx + '" cy="' + cy + '" r="' + ((rOuter + rInner) / 2).toFixed(1) + '" fill="none" stroke="' + slices[0].color + '" stroke-width="' + (rOuter - rInner) + '" class="tm-z-slice" data-z-slice="0"/>';
       } else {
+        // 先保护极小扇区最小弧度，再将超出 2π 的部分按可压缩余量从大扇区等比扣除，确保总弧度严格闭合于 2π 绝不越界覆盖
+        var fullCircle = Math.PI * 2;
+        var minSweep = Math.min(0.025, fullCircle / (slices.length * 4));
+        var sweeps = slices.map(function(s) {
+          return Math.max(minSweep, (s.totalTokens / total) * fullCircle);
+        });
+        var excess = sweeps.reduce(function(acc, v) { return acc + v; }, 0) - fullCircle;
+        if (excess > 1e-6) {
+          var slackTotal = sweeps.reduce(function(acc, v) { return acc + Math.max(0, v - minSweep); }, 0);
+          if (slackTotal > 1e-6) {
+            for (var k = 0; k < sweeps.length; k++) {
+              var slack = Math.max(0, sweeps[k] - minSweep);
+              sweeps[k] -= excess * (slack / slackTotal);
+            }
+          }
+        }
         for (var si = 0; si < slices.length; si++) {
           var s = slices[si];
           var frac = s.totalTokens / total;
-          var sweep = Math.max(0.015, frac * Math.PI * 2);
-          var endAngle = startAngle + sweep;
+          var sweep = sweeps[si];
+          var endAngle = si === slices.length - 1 ? (-Math.PI / 2 + fullCircle) : (startAngle + sweep);
           var largeArc = sweep > Math.PI ? 1 : 0;
           var x1 = cx + rOuter * Math.cos(startAngle);
           var y1 = cy + rOuter * Math.sin(startAngle);
@@ -1454,7 +1524,7 @@ export function buildInlineWidgetScript() {
             ' A ' + rInner + ' ' + rInner + ' 0 ' + largeArc + ' 0 ' + x4.toFixed(2) + ' ' + y4.toFixed(2) + ' Z';
           var pctStr = frac >= 0.1 ? Math.round(frac * 100) + '%' : (frac * 100).toFixed(1) + '%';
           sliceMeta.push({ label: s.label, valText: fmtStatsTokens(s.totalTokens), pctText: pctStr, color: s.color, avgTps: s.avgTps });
-          pathsHtml += '<path d="' + d + '" fill="' + s.color + '" stroke="var(--tm-z-surface)" stroke-width="2.2" class="tm-z-slice" data-z-slice="' + si + '"/>';
+          pathsHtml += '<path d="' + d + '" fill="' + s.color + '" stroke="var(--tm-z-donut-gap)" stroke-width="2.2" class="tm-z-slice" data-z-slice="' + si + '"/>';
           startAngle = endAngle;
         }
       }
@@ -1469,11 +1539,12 @@ export function buildInlineWidgetScript() {
       var listHtml = '<div class="tm-z-pie-list" id="tm-zpie-list">' + slices.map(function(s, si) {
         var share = s.totalTokens / total;
         var pctLabel = share >= 0.1 ? Math.round(share * 100) + '%' : (share * 100).toFixed(1) + '%';
+        var tpsFixed = fmtFixed(s.avgTps, 1);
         return '<div class="tm-z-pie-row" data-z-slice="' + si + '">' +
           '<span class="tm-z-pie-sw" style="background:' + s.color + '"></span>' +
           '<span class="tm-z-pie-name" title="' + escapeHtml(s.label) + '">' + escapeHtml(s.label) + '</span>' +
           '<span class="tm-z-pie-pct">' + escapeHtml(pctLabel) + '</span>' +
-          '<span class="tm-z-pie-sub">' + escapeHtml(fmtStatsTokens(s.totalTokens)) + ' ' + escapeHtml(t('tokensUnit')) + (s.avgTps != null ? ' · ' + Number(s.avgTps).toFixed(1) + ' t/s' : '') + '</span>' +
+          '<span class="tm-z-pie-sub">' + escapeHtml(fmtStatsTokens(s.totalTokens)) + ' ' + escapeHtml(t('tokensUnit')) + (tpsFixed !== null ? ' · ' + tpsFixed + ' t/s' : '') + '</span>' +
         '</div>';
       }).join('') + '</div>';
 
@@ -1490,7 +1561,22 @@ export function buildInlineWidgetScript() {
       var topSeriesModels = info.ranked.slice(0, 5);
 
       var seriesList = [];
-      if (selectedModel && selectedModel !== 'ALL') {
+      if (selectedModel === '__OTHER__') {
+        seriesList.push({
+          label: t('otherModels'),
+          color: '#94a3b8',
+          values: dateKeys.map(function(k) {
+            var rec = daysObj[k];
+            if (!rec) return 0;
+            var topSum = 0;
+            for (var ti = 0; ti < topSeriesModels.length; ti++) {
+              var mKey = topSeriesModels[ti].model;
+              if (rec.byModel && Object.hasOwn(rec.byModel, mKey)) topSum += safeInt(rec.byModel[mKey]);
+            }
+            return Math.max(0, safeInt(rec.total) - topSum);
+          }),
+        });
+      } else if (selectedModel && selectedModel !== 'ALL') {
         var idxFound = topSeriesModels.findIndex(function(x) { return x.model === selectedModel; });
         var color = Z_PALETTE[(idxFound >= 0 ? idxFound : 0) % Z_PALETTE.length];
         seriesList.push({
@@ -1615,6 +1701,7 @@ export function buildInlineWidgetScript() {
       return baseStyles() + \`
         :host {
           --tm-z-surface: #f5f6f8;
+          --tm-z-donut-gap: #f5f6f8;
           --tm-z-pill-bg: #ebedf0;
           --tm-z-blue: #2563eb;
           --tm-zc-0: #e8eaee;
@@ -1625,6 +1712,7 @@ export function buildInlineWidgetScript() {
         }
         :host([data-theme="dark"]) {
           --tm-z-surface: #18181c;
+          --tm-z-donut-gap: #18181c;
           --tm-z-pill-bg: #232329;
           --tm-z-blue: #3b82f6;
           --tm-zc-0: #23252a;
@@ -1635,14 +1723,17 @@ export function buildInlineWidgetScript() {
         }
         :host([data-style="glass"]) {
           --tm-z-surface: rgba(24,24,27,0.045);
+          --tm-z-donut-gap: #f2f4f7;
           --tm-z-pill-bg: rgba(24,24,27,0.07);
         }
         :host([data-theme="dark"][data-style="glass"]) {
           --tm-z-surface: rgba(255,255,255,0.055);
+          --tm-z-donut-gap: #1e2026;
           --tm-z-pill-bg: rgba(255,255,255,0.09);
         }
         :host([data-style="mono"]) {
           --tm-z-surface: #edf2ee;
+          --tm-z-donut-gap: #edf2ee;
           --tm-z-pill-bg: #e1e8e2;
           --tm-z-blue: #059669;
           --tm-zc-0: #dce4de;
@@ -1653,6 +1744,7 @@ export function buildInlineWidgetScript() {
         }
         :host([data-theme="dark"][data-style="mono"]) {
           --tm-z-surface: #121915;
+          --tm-z-donut-gap: #121915;
           --tm-z-pill-bg: #1a241f;
           --tm-z-blue: #10b981;
           --tm-zc-0: #1b241f;
@@ -1861,7 +1953,7 @@ export function buildInlineWidgetScript() {
         if (starSvg) starSvg.setAttribute('class', 'tm-star ' + starCls);
 
         var speedEl = chipsEl.querySelector('[data-tm-v="speed"]');
-        if (speedEl) speedEl.textContent = tpsVal != null ? Number(tpsVal).toFixed(1) : '--';
+        if (speedEl) speedEl.textContent = fmtFixed(tpsVal, 1) || '--';
         var cacheEl = chipsEl.querySelector('[data-tm-v="cache"]');
         if (cacheEl) cacheEl.textContent = fmtPct(cacheVal);
         var ctxEl = chipsEl.querySelector('[data-tm-v="ctx"]');
@@ -1924,40 +2016,6 @@ export function buildInlineWidgetScript() {
           if (state.lastPopHtml !== nextPopHtml || !pop.firstChild) {
             state.lastPopHtml = nextPopHtml;
             pop.innerHTML = nextPopHtml;
-
-            var styleBtn = shadow.getElementById('tm-style-btn');
-            if (styleBtn) styleBtn.onclick = function(ev) {
-              if (!ev || ev.isTrusted !== true) return;
-              state.pointerInPop = false;
-              void updatePrefs({ theme: styleNext });
-            };
-            var copyBtn = shadow.getElementById('tm-copy-btn');
-            if (copyBtn) copyBtn.onclick = function(ev) {
-              if (!ev || ev.isTrusted !== true) return;
-              if (copyTextSafe(buildCopySummaryText())) {
-                state.copiedUntil = Date.now() + 1600;
-                state.pointerInPop = false;
-                renderBar();
-                setTimeout(function() { if (!state.disposed) renderBar(); }, 1650);
-              }
-            };
-            var langBtn = shadow.getElementById('tm-lang-btn');
-            if (langBtn) langBtn.onclick = function(ev) {
-              if (!ev || ev.isTrusted !== true) return;
-              state.pointerInPop = false;
-              void updatePrefs({ language: state.prefs.language === 'en' ? 'zh-CN' : 'en' });
-            };
-            var openBtn = shadow.getElementById('tm-open-modal');
-            if (openBtn) openBtn.onclick = function(ev) {
-              if (!ev || ev.isTrusted !== true) return;
-              clearTimeout(state.hoverTimer);
-              state.pointerInPop = false;
-              state.popoverOpen = false;
-              state.pinned = false;
-              state.modalOpen = true;
-              renderBar();
-              renderModal();
-            };
           }
           positionPopover();
         }
@@ -1996,13 +2054,17 @@ export function buildInlineWidgetScript() {
 
       var rangeInfo = computeRangeModelBreakdown(usage, rangeDays);
       var topModels = rangeInfo.ranked.slice(0, 5).map(function(m) { return m.model; });
-      if (trendModel !== 'ALL' && topModels.indexOf(trendModel) < 0) trendModel = 'ALL';
+      if (trendModel !== 'ALL' && trendModel !== '__OTHER__' && topModels.indexOf(trendModel) < 0) trendModel = 'ALL';
+      if (trendModel === '__OTHER__' && !rangeInfo.hasOtherInRange) trendModel = 'ALL';
 
       var legendHtml =
         '<button type="button" class="tm-z-leg ' + (trendModel === 'ALL' ? 'active' : '') + '" data-trend-model="ALL"><i class="tm-z-dot"></i>' + escapeHtml(t('allModels')) + '</button>' +
         topModels.map(function(name, idx) {
           return '<button type="button" class="tm-z-leg ' + (trendModel === name ? 'active' : '') + '" data-trend-model="' + escapeHtml(name) + '"><i class="tm-z-dot" style="background:' + Z_PALETTE[idx % Z_PALETTE.length] + '"></i>' + escapeHtml(name) + '</button>';
-        }).join('');
+        }).join('') +
+        (rangeInfo.hasOtherInRange
+          ? '<button type="button" class="tm-z-leg ' + (trendModel === '__OTHER__' ? 'active' : '') + '" data-trend-model="__OTHER__"><i class="tm-z-dot" style="background:#94a3b8"></i>' + escapeHtml(t('otherModels')) + '</button>'
+          : '');
 
       var actChart = buildZActivitySvg(usage, actMode);
       var trendChart = buildZSmoothTrendSvg(usage, rangeDays, trendModel);
@@ -2075,7 +2137,7 @@ export function buildInlineWidgetScript() {
               trendChart.html +
             '</div>' +
             '<div class="tm-z-card">' +
-              '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('modelUsageTitle')) + '</span><span class="tm-z-card-sub">' + safeInt(usage.totalRequests).toLocaleString() + ' ' + escapeHtml(t('requests')) + '</span></div>' +
+              '<div class="tm-z-card-head"><span class="tm-z-card-title">' + escapeHtml(t('modelUsageTitle')) + '</span><span class="tm-z-card-sub">' + safeInt(rangeInfo.rangeRequests).toLocaleString() + ' ' + escapeHtml(t('requests')) + '</span></div>' +
               modelsHtml +
             '</div>' +
             '<div class="tm-z-card">' +
@@ -2294,10 +2356,11 @@ export function buildInlineWidgetScript() {
           if (dValEl) dValEl.textContent = cur.valText;
           if (dUnitEl) dUnitEl.textContent = cur.pctText;
           if (withTip && ev) {
+            var curAvgFixed = fmtFixed(cur.avgTps, 1);
             placeTip(ev,
               '<div class="tm-z-tip-head"><span>' + escapeHtml(cur.label) + '</span><em>' + escapeHtml(cur.pctText) + '</em></div>' +
               '<div class="tm-z-tip-row"><span class="tm-z-tip-k"><i class="tm-z-dot" style="background:' + cur.color + '"></i>' + escapeHtml(t('colTotal')) + '</span><span class="tm-z-tip-v">' + escapeHtml(cur.valText + ' ' + t('tokensUnit')) + '</span></div>' +
-              (cur.avgTps != null ? '<div class="tm-z-tip-row"><span class="tm-z-tip-k">' + escapeHtml(t('colAvgTps')) + '</span><span class="tm-z-tip-v">' + Number(cur.avgTps).toFixed(1) + ' tok/s</span></div>' : '')
+              (curAvgFixed !== null ? '<div class="tm-z-tip-row"><span class="tm-z-tip-k">' + escapeHtml(t('colAvgTps')) + '</span><span class="tm-z-tip-v">' + curAvgFixed + ' tok/s</span></div>' : '')
             );
           }
         }
@@ -2370,6 +2433,36 @@ export function buildInlineWidgetScript() {
         });
         popNode.addEventListener('pointerdown', function() {
           state.pointerInPop = true;
+        });
+        // 使用事件委托处理浮卡内所有按钮，避免生成中 2.5s 刷新内容时吃掉点击事件
+        popNode.addEventListener('click', function(ev) {
+          if (!ev || ev.isTrusted !== true) return;
+          var btn = ev.target && ev.target.closest ? ev.target.closest('#tm-style-btn, #tm-copy-btn, #tm-lang-btn, #tm-open-modal') : null;
+          if (!btn) return;
+          var bid = btn.id;
+          if (bid === 'tm-style-btn') {
+            var styleNext = THEMES[(THEMES.indexOf(currentStyle()) + 1) % THEMES.length];
+            state.pointerInPop = false;
+            void updatePrefs({ theme: styleNext });
+          } else if (bid === 'tm-copy-btn') {
+            if (copyTextSafe(buildCopySummaryText())) {
+              state.copiedUntil = Date.now() + 1600;
+              state.pointerInPop = false;
+              renderBar();
+              setTimeout(function() { if (!state.disposed) renderBar(); }, 1650);
+            }
+          } else if (bid === 'tm-lang-btn') {
+            state.pointerInPop = false;
+            void updatePrefs({ language: state.prefs.language === 'en' ? 'zh-CN' : 'en' });
+          } else if (bid === 'tm-open-modal') {
+            clearTimeout(state.hoverTimer);
+            state.pointerInPop = false;
+            state.popoverOpen = false;
+            state.pinned = false;
+            state.modalOpen = true;
+            renderBar();
+            renderModal();
+          }
         });
         wrap.addEventListener('mouseleave', function() {
           if (state.pinned) return;
@@ -2446,10 +2539,10 @@ export function buildInlineWidgetScript() {
         if (state.snapshot) state.snapshot = Object.assign({}, state.snapshot, { conversation: null, conversationUnavailable: !cid });
         renderBar();
       }
-      if (!cid) return;
+      // 即使处于新对话首页（cid 为 null）也照常拉取全局额度、今日/本月与偏好；后端 allowFallback=false 保证绝不串旧会话
       var mySeq = ++state.requestSeq;
       try {
-        var snap = await window.__agTokenMeterApi.getSnapshot(cid);
+        var snap = await window.__agTokenMeterApi.getSnapshot(cid || null);
         if (state.disposed || mySeq !== state.requestSeq || cid !== state.lastCid) return;
         if (snap && snap.disabled) {
           dispose();
@@ -2492,9 +2585,18 @@ export function buildInlineWidgetScript() {
       }
     }
 
-    function onViewportChange() {
+    function onResize() {
       ensureMounted();
       if (state.popoverOpen) positionPopover();
+    }
+
+    function onScroll() {
+      if (!state.popoverOpen || scrollRaf) return;
+      var raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function(fn) { return setTimeout(fn, 16); };
+      scrollRaf = raf(function() {
+        scrollRaf = 0;
+        if (!state.disposed && state.popoverOpen) positionPopover();
+      });
     }
 
     function onPointerUp() {
@@ -2510,14 +2612,19 @@ export function buildInlineWidgetScript() {
       clearTimeout(mountDebounce);
       clearTimeout(resizeDebounce);
       clearTimeout(state.hoverTimer);
+      if (scrollRaf) {
+        if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(scrollRaf);
+        else clearTimeout(scrollRaf);
+        scrollRaf = 0;
+      }
       try { observer && observer.disconnect(); } catch {}
       try { resizeObserver && resizeObserver.disconnect(); } catch {}
       observedFooter = null;
       document.removeEventListener('click', onDocClick, true);
       document.removeEventListener('keydown', onKeyDown, true);
       window.removeEventListener('pointerup', onPointerUp, true);
-      window.removeEventListener('resize', onViewportChange);
-      window.removeEventListener('scroll', onViewportChange, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('scroll', onScroll, true);
       if (hostEl) { hostEl.remove(); hostEl = null; shadow = null; }
       if (modalHost) { modalHost.remove(); modalHost = null; modalShadow = null; }
       delete window.__agTokenMeterMounted;
@@ -2528,8 +2635,8 @@ export function buildInlineWidgetScript() {
     document.addEventListener('click', onDocClick, true);
     document.addEventListener('keydown', onKeyDown, true);
     window.addEventListener('pointerup', onPointerUp, true);
-    window.addEventListener('resize', onViewportChange);
-    window.addEventListener('scroll', onViewportChange, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('scroll', onScroll, true);
 
     function boot() {
       if (state.disposed) return;

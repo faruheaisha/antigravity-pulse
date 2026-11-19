@@ -101,4 +101,22 @@ test('UsageLedger 支持聚合历史导入、重叠替换、幂等防重与 pend
   const dup = await live.applyImportBundle(bundle);
   assert.equal(dup.applied, false);
   assert.equal(dup.reason, 'already_applied');
+
+  // 重叠替换保留的次日记录 future-1 再次被轮询 ingest 时必须去重不翻倍，且 models 明细（requests/output）完整保留
+  await live.ingest([
+    { id: 'future-1', timestamp: '2026-11-20T01:00:00.000Z', model: 'Gemini 4 Neon', inputTokens: 200, cacheReadTokens: 300, outputTokens: 50 },
+  ]);
+  const afterReplay = await live.snapshot(new Date('2026-11-20T02:00:00.000Z'));
+  assert.equal(afterReplay.totalTokens, 150550);
+  const neonRank = afterReplay.modelRank.find((m) => m.model === 'Gemini 4 Neon');
+  assert.equal(neonRank.requests, 1);
+  assert.equal(neonRank.outputTokens, 50);
+
+  // 损坏账本调用 applyImportBundle 必须显式拒绝，不得谎报成功
+  const badPath = join(dir, 'corrupted-import.json');
+  await writeFile(badPath, '{not-json', 'utf8');
+  const badLedger = new UsageLedger(badPath);
+  const badRes = await badLedger.applyImportBundle(bundle);
+  assert.equal(badRes.applied, false);
+  assert.equal(badRes.reason, 'corrupted_ledger');
 });

@@ -404,7 +404,16 @@ export class CdpInlineBridge {
       try {
         await mkdir(dirname(this.statusFile), { recursive: true });
         await writeFile(tmp, JSON.stringify(this.status, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-        await rename(tmp, this.statusFile);
+        for (let i = 0; i < 3; i++) {
+          try {
+            await rename(tmp, this.statusFile);
+            break;
+          } catch (err) {
+            const transient = err?.code === 'EPERM' || err?.code === 'EBUSY' || err?.code === 'EACCES';
+            if (!transient || i === 2) throw err;
+            await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+          }
+        }
       } catch {
         try { await unlink(tmp); } catch {}
       }
@@ -454,6 +463,19 @@ export class CdpInlineBridge {
       conn.mounted = false;
       return;
     }
+    if (msg.method === 'Runtime.executionContextCreated') {
+      const ctx = p.context;
+      if (
+        ctx &&
+        ctx.name === WORLD_NAME &&
+        ctx.auxData?.isDefault === false &&
+        (!conn.frameId || !ctx.auxData?.frameId || ctx.auxData.frameId === conn.frameId) &&
+        Number.isSafeInteger(ctx.id)
+      ) {
+        conn.worldContextId = ctx.id;
+      }
+      return;
+    }
     if (msg.method === 'Runtime.executionContextDestroyed') {
       if (p.executionContextId === conn.worldContextId) {
         conn.worldContextId = null;
@@ -478,7 +500,7 @@ export class CdpInlineBridge {
       if (!this.isEnabled() || !this.hasOwnership()) {
         result = { connected: false, disabled: true };
       } else if (req.type === 'snapshot') {
-        result = await this.getSnapshot({ conversationId: req.input?.conversationId || null });
+        result = await this.getSnapshot({ conversationId: req.input?.conversationId || null, allowFallback: false });
       } else if (req.type === 'prefs_get') {
         result = await this.getPrefs();
       } else if (req.type === 'prefs_set') {
@@ -486,7 +508,7 @@ export class CdpInlineBridge {
       }
 
       const serialized = JSON.stringify(result);
-      if (serialized.length > 1024 * 1024) throw new Error('payload_too_large');
+      if (Buffer.byteLength(serialized, 'utf8') > 900 * 1024) throw new Error('payload_too_large');
 
       if (!this.stopping && !conn.closed && conn.docEpoch === capturedEpoch && conn.worldContextId === capturedCtxId && this.hasOwnership()) {
         await conn.send('Runtime.evaluate', {

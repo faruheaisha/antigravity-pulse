@@ -182,11 +182,12 @@ export function projectQuotaSummary(rawSummary, nowMs = Date.now()) {
 
     const title = (typeof grp.displayName === 'string' && grp.displayName.trim().slice(0, 120)) || entries[0].label || 'Quota';
     const leadEntry = entries.reduce((min, cur) => (cur.remainingFraction < min.remainingFraction ? cur : min), entries[0]);
+    const modelHints = [title, ...entries.map((e) => e.label).filter(Boolean)].filter((v, idx, arr) => arr.indexOf(v) === idx);
     projected.push({
       title,
       leadModel: title,
       modelCount: 1,
-      models: [title],
+      models: modelHints,
       remainingFraction: leadEntry.remainingFraction,
       resetTime: leadEntry.resetTime,
       windowKind: leadEntry.windowKind,
@@ -233,6 +234,18 @@ export function projectQuotaSummary(rawSummary, nowMs = Date.now()) {
 }
 
 /**
+ * 从模型名提取家族归属，用于在官方分组名为通用家族名（如 "Claude and GPT models" / "Gemini Models"）时精准匹配。
+ */
+function inferModelFamily(name) {
+  const s = String(name || '').toLowerCase();
+  if (!s) return null;
+  if (/\b(claude|anthropic)\b/.test(s)) return 'claude_gpt';
+  if (/\b(gpt|openai|o1|o3|o4|codex)\b/.test(s)) return 'claude_gpt';
+  if (/\bgemini\b/.test(s)) return 'gemini';
+  return null;
+}
+
+/**
  * 为底部状态条挑选「5小时额度 / 周额度」双值摘要（优先匹配当前会话模型所在分组）。
  * @param {Array<any>} quotas
  * @param {string | null} [activeModel]
@@ -243,13 +256,27 @@ export function selectQuotaPair(quotas, activeModel = null) {
   let chosen = null;
   if (typeof activeModel === 'string' && activeModel.trim()) {
     const needle = activeModel.trim().toLowerCase().replace(/\s*\([^)]*\)$/, '');
+    const buildHay = (q) => [q.title, q.leadModel, ...(Array.isArray(q.models) ? q.models : [])]
+      .filter((s) => typeof s === 'string')
+      .join(' ')
+      .toLowerCase();
+
+    // 1. 优先精确子串匹配（双向兼容具体型号与通用组名）
     chosen = quotas.find((q) => {
-      const hay = [q.title, q.leadModel, ...(Array.isArray(q.models) ? q.models : [])]
-        .filter((s) => typeof s === 'string')
-        .join(' ')
-        .toLowerCase();
-      return needle && hay.includes(needle);
+      const hay = buildHay(q);
+      const titleLow = String(q.title || '').trim().toLowerCase();
+      return Boolean(needle) && (hay.includes(needle) || (titleLow.length >= 4 && needle.includes(titleLow)));
     }) || null;
+
+    // 2. 回退按模型家族匹配（如 "Claude Opus 5.5" -> "Claude and GPT models"，"Gemini 4 Neon" -> "Gemini Models"）
+    if (!chosen) {
+      const fam = inferModelFamily(needle);
+      if (fam === 'claude_gpt') {
+        chosen = quotas.find((q) => /\b(claude|gpt|openai)\b/.test(buildHay(q))) || null;
+      } else if (fam === 'gemini') {
+        chosen = quotas.find((q) => /\bgemini\b/.test(buildHay(q))) || null;
+      }
+    }
   }
 
   // 优先选同时有 5h 与周额度的分组，其次按最紧迫的组回退
@@ -257,18 +284,8 @@ export function selectQuotaPair(quotas, activeModel = null) {
     chosen = quotas.find((q) => q.fiveHour && q.weekly) || quotas[0];
   }
 
-  let fiveHour = chosen.fiveHour || (chosen.windowKind === '5h' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
-  let weekly = chosen.weekly || (chosen.windowKind === 'week' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
-
-  // 若选定组只有一侧，尝试在其余分组补齐缺失侧
-  if (!fiveHour) {
-    const fGrp = quotas.find((q) => q.fiveHour || q.windowKind === '5h');
-    if (fGrp) fiveHour = fGrp.fiveHour || { remainingFraction: fGrp.remainingFraction, resetTime: fGrp.resetTime };
-  }
-  if (!weekly) {
-    const wGrp = quotas.find((q) => q.weekly || q.windowKind === 'week');
-    if (wGrp) weekly = wGrp.weekly || { remainingFraction: wGrp.remainingFraction, resetTime: wGrp.resetTime };
-  }
+  const fiveHour = chosen.fiveHour || (chosen.windowKind === '5h' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
+  const weekly = chosen.weekly || (chosen.windowKind === 'week' ? { remainingFraction: chosen.remainingFraction, resetTime: chosen.resetTime } : null);
 
   return {
     title: chosen.title || '',
@@ -570,12 +587,18 @@ export function computeConversationTelemetry({
   const totalTokens = totalInputAll + totalOutput;
   const cacheHitRate = totalInputAll > 0 ? totalCacheRead / totalInputAll : null;
   const sessionTps = weightedStreamingSec > 0 ? weightedOutput / weightedStreamingSec : null;
-  const thinkingRatio = totalOutput > 0 ? Number((totalThinkingOutput / totalOutput).toFixed(4)) : null;
+  const thinkingRatio = totalOutput > 0
+    ? Number(Math.max(0, Math.min(1, totalThinkingOutput / totalOutput)).toFixed(4))
+    : null;
 
   let enrichedContext = latestContext;
   if (latestContext && deduped.size >= 2) {
     const avgTurnDelta = (totalUncachedInput + totalOutput) / deduped.size;
-    const estTurns = avgTurnDelta >= 200 ? Math.max(1, Math.min(999, Math.floor(latestContext.remainingTokens / avgTurnDelta))) : null;
+    const estTurns = latestContext.remainingTokens <= 0
+      ? 0
+      : avgTurnDelta >= 200
+        ? Math.max(0, Math.min(999, Math.floor(latestContext.remainingTokens / avgTurnDelta)))
+        : null;
     enrichedContext = { ...latestContext, estimatedTurnsLeft: estTurns };
   }
 
@@ -583,7 +606,7 @@ export function computeConversationTelemetry({
     cascadeId,
     status: String(status || ''),
     running: status === 'CASCADE_RUN_STATUS_RUNNING',
-    model: latestSample?.model || latestModel,
+    model: latestModel || latestSample?.model || null,
     lastRequestTime,
     requests: ledgerEvents.length,
     measuredRequests,

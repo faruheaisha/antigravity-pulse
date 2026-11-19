@@ -37,6 +37,7 @@ function createEmptyState() {
     schema: 2,
     lifetimeTotal: 0,
     importedUntil: null,
+    evictedUntil: null,
     appliedImports: [],
     recordOrder: [],
     records: Object.create(null),
@@ -44,6 +45,22 @@ function createEmptyState() {
     models: Object.create(null),
     updatedAt: null,
   };
+}
+
+/**
+ * 兼容 Windows 瞬时文件句柄占用的原子替换重试辅助函数。
+ */
+async function renameWithRetry(tmpPath, dstPath, maxAttempts = 4) {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      await rename(tmpPath, dstPath);
+      return;
+    } catch (err) {
+      const transient = err?.code === 'EPERM' || err?.code === 'EBUSY' || err?.code === 'EACCES';
+      if (!transient || i === maxAttempts - 1) throw err;
+      await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+    }
+  }
 }
 
 function rebuildSafeState(parsed) {
@@ -64,6 +81,9 @@ function rebuildSafeState(parsed) {
   next.lifetimeTotal = safeInt(parsed.lifetimeTotal);
   next.importedUntil = typeof parsed.importedUntil === 'string' && Number.isFinite(Date.parse(parsed.importedUntil))
     ? parsed.importedUntil
+    : null;
+  next.evictedUntil = typeof parsed.evictedUntil === 'string' && Number.isFinite(Date.parse(parsed.evictedUntil))
+    ? parsed.evictedUntil
     : null;
   if (Array.isArray(parsed.appliedImports)) {
     next.appliedImports = parsed.appliedImports
@@ -117,6 +137,7 @@ function rebuildSafeState(parsed) {
       next.recordOrder.push(id);
       next.records[id] = {
         dateKey: typeof rec.dateKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(rec.dateKey) ? rec.dateKey : toLocalDateKey(),
+        ts: safeInt(rec.ts),
         model: String(rec.model || 'Unknown').slice(0, 128),
         input: safeInt(rec.input),
         cacheRead: safeInt(rec.cacheRead),
@@ -181,6 +202,8 @@ export class UsageLedger {
    */
   async applyImportBundle(bundle, { skipFlush = false } = {}) {
     if (!skipFlush) await this.load();
+    if (this.readOnly) return { applied: false, reason: 'readonly' };
+    if (this.corrupted) return { applied: false, reason: 'corrupted_ledger' };
     if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle) || bundle.schema !== 1) {
       return { applied: false, reason: 'invalid_bundle' };
     }
@@ -194,18 +217,30 @@ export class UsageLedger {
       ? new Date(Date.parse(bundle.importedUntil)).toISOString()
       : null;
 
-    // 首次导入且开启重叠替换时，仅保留晚于截断日的新日期增量，以旧账本为干净基线防双记
+    // 首次导入且开启重叠替换时，仅保留晚于截断日的新日期增量及原始记录 ID，防止后续轮询把次日新数据翻倍双记
     const shouldReplaceOverlap =
       bundle.replaceOverlappingBeforeCutoff === true &&
       !this.state.importedUntil &&
       cutoffIso !== null;
 
-    let futureDays = null;
+    let futureDaysFallback = null;
+    let preservedRecords = null;
     if (shouldReplaceOverlap) {
       const cutoffDateKey = toLocalDateKey(cutoffIso);
-      futureDays = Object.create(null);
+      preservedRecords = [];
+      const coveredFutureDates = new Set();
+      for (const id of this.state.recordOrder) {
+        const rec = Object.hasOwn(this.state.records, id) ? this.state.records[id] : null;
+        if (rec && rec.dateKey > cutoffDateKey) {
+          preservedRecords.push([id, rec]);
+          coveredFutureDates.add(rec.dateKey);
+        }
+      }
+      futureDaysFallback = Object.create(null);
       for (const [k, entry] of Object.entries(this.state.days)) {
-        if (k > cutoffDateKey) futureDays[k] = entry;
+        if (k > cutoffDateKey && !coveredFutureDates.has(k)) {
+          futureDaysFallback[k] = entry;
+        }
       }
       this.state.lifetimeTotal = 0;
       this.state.recordOrder = [];
@@ -282,9 +317,23 @@ export class UsageLedger {
     const bundleLifetime = safeInt(bundle.lifetimeTotal);
     this.state.lifetimeTotal += Math.max(bundleLifetime, addedDayTotal);
 
-    // 还原严格晚于截断日期的未来增量日桶
-    if (futureDays) {
-      for (const [dateKey, entry] of Object.entries(futureDays)) {
+    // 还原严格晚于截断日期的未来增量记录（保留原始 ID 与完整字段，既防止后续轮询双记又完整保留 models 明细）
+    if (preservedRecords && preservedRecords.length > 0) {
+      for (const [id, rec] of preservedRecords) {
+        this.state.records[id] = rec;
+        this.state.recordOrder.push(id);
+        this._applyDelta(rec.dateKey, rec.model, {
+          input: rec.input,
+          cacheRead: rec.cacheRead,
+          output: rec.output,
+          thinking: rec.thinking,
+          timedOutput: rec.timedOutput,
+          streamingSec: rec.streamingSec,
+        }, true);
+      }
+    }
+    if (futureDaysFallback) {
+      for (const [dateKey, entry] of Object.entries(futureDaysFallback)) {
         if (!Object.hasOwn(this.state.days, dateKey)) {
           this.state.days[dateKey] = entry;
           this.state.lifetimeTotal += safeInt(entry.total);
@@ -410,6 +459,7 @@ export class UsageLedger {
     if (!Array.isArray(events) || events.length === 0) return 0;
 
     let changed = 0;
+    const evictedUntilMs = this.state.evictedUntil ? Date.parse(this.state.evictedUntil) : 0;
     for (const ev of events) {
       if (!ev || typeof ev.id !== 'string' || !ev.id) continue;
       const input = safeInt(ev.inputTokens) + safeInt(ev.cacheWriteTokens);
@@ -425,8 +475,16 @@ export class UsageLedger {
       const prev = Object.hasOwn(this.state.records, id) ? this.state.records[id] : null;
 
       if (!prev) {
-        const dateKey = toLocalDateKey(ev.timestamp || Date.now());
-        this.state.records[id] = { dateKey, model, input, cacheRead, output, thinking, timedOutput, streamingSec };
+        const parsedTs = typeof ev.timestamp === 'number'
+          ? (Number.isFinite(ev.timestamp) ? ev.timestamp : NaN)
+          : Date.parse(ev.timestamp || '');
+        const evTs = Number.isFinite(parsedTs) && parsedTs > 0 ? Math.round(parsedTs) : Date.now();
+        // 已被 MAX_RECORDS FIFO 淘汰的老请求不得因重启回填或翻阅旧会话而重复入账
+        if (Number.isFinite(evictedUntilMs) && evictedUntilMs > 0 && Number.isFinite(parsedTs) && parsedTs <= evictedUntilMs) {
+          continue;
+        }
+        const dateKey = toLocalDateKey(evTs);
+        this.state.records[id] = { dateKey, ts: evTs, model, input, cacheRead, output, thinking, timedOutput, streamingSec };
         this.state.recordOrder.push(id);
         this._applyDelta(dateKey, model, { input, cacheRead, output, thinking, timedOutput, streamingSec }, true);
         changed++;
@@ -461,7 +519,19 @@ export class UsageLedger {
     if (changed > 0) {
       if (this.state.recordOrder.length > MAX_RECORDS) {
         const overflow = this.state.recordOrder.splice(0, this.state.recordOrder.length - MAX_RECORDS);
-        for (const oldId of overflow) delete this.state.records[oldId];
+        let maxEvictedMs = this.state.evictedUntil ? Date.parse(this.state.evictedUntil) : 0;
+        if (!Number.isFinite(maxEvictedMs)) maxEvictedMs = 0;
+        for (const oldId of overflow) {
+          const oldRec = Object.hasOwn(this.state.records, oldId) ? this.state.records[oldId] : null;
+          if (oldRec) {
+            const recMs = safeInt(oldRec.ts) || Date.parse(`${oldRec.dateKey}T23:59:59.999Z`);
+            if (Number.isFinite(recMs) && recMs > maxEvictedMs) maxEvictedMs = recMs;
+          }
+          delete this.state.records[oldId];
+        }
+        if (maxEvictedMs > 0) {
+          this.state.evictedUntil = new Date(maxEvictedMs).toISOString();
+        }
       }
       const dayKeys = Object.keys(this.state.days).sort();
       if (dayKeys.length > MAX_DAYS) {
@@ -480,6 +550,13 @@ export class UsageLedger {
     await this.load();
     if (!this.state.importedUntil) return 0;
     const ms = Date.parse(this.state.importedUntil);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  async getEvictedUntilMs() {
+    await this.load();
+    if (!this.state.evictedUntil) return 0;
+    const ms = Date.parse(this.state.evictedUntil);
     return Number.isFinite(ms) ? ms : 0;
   }
 
@@ -509,12 +586,16 @@ export class UsageLedger {
 
   async _flushUnlocked() {
     if (this.readOnly || this.corrupted || !this.filePath) return;
-    if (this._flushPromise) {
-      await this._flushPromise;
+    while (this._flushPromise) {
+      try {
+        await this._flushPromise;
+      } catch {
+        // 等待前一个落盘结束，后续重新评估版本号
+      }
       if (this._committedRevision >= this._revision) return;
     }
 
-    this._flushPromise = (async () => {
+    const current = (async () => {
       while (this._committedRevision < this._revision) {
         const targetRev = this._revision;
         const payload = JSON.stringify(this.state);
@@ -522,7 +603,7 @@ export class UsageLedger {
         try {
           await mkdir(dirname(this.filePath), { recursive: true });
           await writeFile(tmp, payload, { encoding: 'utf8', mode: 0o600 });
-          await rename(tmp, this.filePath);
+          await renameWithRetry(tmp, this.filePath);
           this._committedRevision = targetRev;
           this.lastWriteError = null;
         } catch (err) {
@@ -533,10 +614,13 @@ export class UsageLedger {
       }
     })();
 
+    this._flushPromise = current;
     try {
-      await this._flushPromise;
+      await current;
     } finally {
-      this._flushPromise = null;
+      if (this._flushPromise === current) {
+        this._flushPromise = null;
+      }
     }
   }
 

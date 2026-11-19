@@ -200,6 +200,14 @@ export class LanguageServerClient {
     try {
       return await this.rpcImpl({ ...ep, method, body, timeoutMs: rem1 });
     } catch (err) {
+      // 明确的业务 4xx（如 404 不支持该 RPC 或会话不存在）说明端点可达，不清空缓存也不触发无效重连抖动
+      const isClientErr =
+        Number.isInteger(err?.statusCode) &&
+        err.statusCode >= 400 &&
+        err.statusCode < 500 &&
+        err.statusCode !== 401 &&
+        err.statusCode !== 403;
+      if (isClientErr) throw err;
       if (this._resolved && this._resolved.generation === ep.generation) {
         this._resolved = null;
       }

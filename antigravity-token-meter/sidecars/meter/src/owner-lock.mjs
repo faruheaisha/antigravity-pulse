@@ -2,11 +2,12 @@
  * 基于排他锁文件（O_CREAT | O_EXCL）的跨进程单写者租约锁。
  * 绝不强抢仍在存活且未过期的持有者，防止双 sidecar 并发覆盖账本与状态。
  */
-import { mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const LEASE_TTL_MS = 12000;
+const STALE_CORRUPT_GRACE_MS = 3000;
 
 function isPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -46,7 +47,41 @@ export class OwnerLease {
   }
 
   /**
-   * 通过排他创建（wx）抢占所有权；仅在确认已有租约对应 PID 已退出且超时后才回收旧锁重试。
+   * 原子创建锁文件：先将完整内容写入临时文件再用硬链接原子发布，彻底消除创建空文件到写入完成的 TOCTOU 窗口。
+   */
+  async _tryCreateAtomic() {
+    const tmp = `${this.leaseFile}.${process.pid}.${randomUUID().slice(0, 8)}.claim`;
+    try {
+      await writeFile(tmp, this._payload(), { encoding: 'utf8', mode: 0o600 });
+      try {
+        await link(tmp, this.leaseFile);
+        return true;
+      } catch (err) {
+        if (err?.code === 'EEXIST') return false;
+        // 某些不支持硬链接的文件系统安全降级为排他 wx 打开
+        if (err?.code === 'EXDEV' || err?.code === 'ENOSYS' || err?.code === 'EPERM' || err?.code === 'ENOTSUP') {
+          try {
+            const fh = await open(this.leaseFile, 'wx', 0o600);
+            try {
+              await fh.writeFile(this._payload(), 'utf8');
+            } finally {
+              await fh.close();
+            }
+            return true;
+          } catch (wxErr) {
+            if (wxErr?.code === 'EEXIST') return false;
+            throw wxErr;
+          }
+        }
+        throw err;
+      }
+    } finally {
+      try { await unlink(tmp); } catch {}
+    }
+  }
+
+  /**
+   * 通过原子发布抢占所有权；确认旧锁 PID 已退出、僵死超时或损坏超过宽限期时安全回收重试。
    */
   async claim() {
     if (!this.leaseFile) {
@@ -57,29 +92,33 @@ export class OwnerLease {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const fh = await open(this.leaseFile, 'wx', 0o600);
-        try {
-          await fh.writeFile(this._payload(), 'utf8');
-        } finally {
-          await fh.close();
-        }
-        this.owned = true;
-        return true;
-      } catch (err) {
-        if (err?.code !== 'EEXIST') {
-          this.owned = false;
-          return false;
+        const created = await this._tryCreateAtomic();
+        if (created) {
+          this.owned = true;
+          return true;
         }
         const existing = await this._readLease();
-        const deadOrExpired =
-          !existing ||
-          (!isPidAlive(existing.pid) && Date.now() - Number(existing.heartbeatAt || 0) > LEASE_TTL_MS);
+        let deadOrExpired = false;
+        if (!existing) {
+          // 读取解析失败时检查文件年龄，避免误删另一进程刚创建的锁文件
+          try {
+            const st = await stat(this.leaseFile);
+            deadOrExpired = Date.now() - st.mtimeMs > STALE_CORRUPT_GRACE_MS;
+          } catch {
+            deadOrExpired = true;
+          }
+        } else {
+          const heartbeatAge = Date.now() - Number(existing.heartbeatAt || 0);
+          deadOrExpired = !isPidAlive(existing.pid) || heartbeatAge > LEASE_TTL_MS * 2;
+        }
         if (!deadOrExpired) {
           this.owned = false;
           return false;
         }
-        // 仅清理确认已死亡且过期的陈旧锁后重试一次排他创建
         try { await unlink(this.leaseFile); } catch {}
+      } catch {
+        this.owned = false;
+        return false;
       }
     }
     this.owned = false;
@@ -96,7 +135,16 @@ export class OwnerLease {
     const tmp = `${this.leaseFile}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
     try {
       await writeFile(tmp, this._payload(), { encoding: 'utf8', mode: 0o600 });
-      await rename(tmp, this.leaseFile);
+      for (let i = 0; i < 3; i++) {
+        try {
+          await rename(tmp, this.leaseFile);
+          return true;
+        } catch (err) {
+          const transient = err?.code === 'EPERM' || err?.code === 'EBUSY' || err?.code === 'EACCES';
+          if (!transient || i === 2) throw err;
+          await new Promise((r) => setTimeout(r, 60 * (i + 1)));
+        }
+      }
       return true;
     } catch {
       try { await unlink(tmp); } catch {}
@@ -109,7 +157,13 @@ export class OwnerLease {
     if (this._timer) return;
     this._timer = setInterval(async () => {
       const ok = await this.renew();
-      if (!ok) onLost();
+      if (!ok) {
+        if (this._timer) {
+          clearInterval(this._timer);
+          this._timer = null;
+        }
+        onLost();
+      }
     }, 4000);
     this._timer.unref?.();
   }

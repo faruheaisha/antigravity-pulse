@@ -140,3 +140,63 @@ test('projectUserStatus 立即剔除邮箱等敏感字段；computeConversationT
   // 账本去重 ID 已单向哈希，不含原始 responseId
   assert.equal(result.ledgerEvents.some((e) => e.id.includes('raw-secret-resp-1')), false);
 });
+
+test('selectQuotaPair 支持按模型家族匹配官方分组且不跨组借用缺失侧；上下文满窗与 thinkingRatio 边界准确', () => {
+  const now = Date.parse('2026-11-19T12:00:00Z');
+  const groups = projectQuotaSummary({
+    response: {
+      groups: [
+        {
+          displayName: 'Gemini Models',
+          buckets: [
+            { displayName: '5h', window: '5h', remainingFraction: 0.95, resetTime: '2026-11-19T16:00:00Z' },
+            { displayName: 'Weekly', window: 'weekly', remainingFraction: 0.91, resetTime: '2026-11-24T12:00:00Z' },
+          ],
+        },
+        {
+          displayName: 'Claude and GPT models',
+          buckets: [
+            { displayName: '5h', window: '5h', remainingFraction: 0.11, resetTime: '2026-11-19T13:30:00Z' },
+          ],
+        },
+      ],
+    },
+  }, now);
+
+  // 切到 Claude 对话必须精准选中 Claude and GPT models，且该组无周额度时绝不借用 Gemini 的 91%
+  const claudePair = selectQuotaPair(groups, 'Claude Opus 5.5 (High)');
+  assert.equal(claudePair.title, 'Claude and GPT models');
+  assert.equal(claudePair.fiveHourFraction, 0.11);
+  assert.equal(claudePair.weeklyFraction, null);
+
+  const geminiPair = selectQuotaPair(groups, 'Gemini 4 Neon (High)');
+  assert.equal(geminiPair.title, 'Gemini Models');
+  assert.equal(geminiPair.fiveHourFraction, 0.95);
+  assert.equal(geminiPair.weeklyFraction, 0.91);
+
+  // 上下文 100% 满窗 -> estimatedTurnsLeft === 0；thinkingRatio 钳制 <= 1；切模型后 model 取最新请求
+  const fullCtx = computeConversationTelemetry({
+    cascadeId: '22222222-2222-2222-2222-222222222222',
+    generatorMetadata: [
+      {
+        stepIndices: [1],
+        chatModel: {
+          modelDisplayName: 'Gemini 4 Neon (High)',
+          streamingDuration: '2.0s',
+          usage: { inputTokens: '1000', outputTokens: '200', thinkingOutputTokens: '300', responseId: 'r1' },
+        },
+      },
+      {
+        stepIndices: [2],
+        chatModel: {
+          modelDisplayName: 'Claude Opus 5.5 (High)',
+          chatStartMetadata: { contextWindowMetadata: { estimatedTokensUsed: 512000, maxContextTokens: 512000 } },
+          usage: { inputTokens: '2000', outputTokens: '100', responseId: 'r2' },
+        },
+      },
+    ],
+  });
+  assert.equal(fullCtx.model, 'Claude Opus 5.5 (High)');
+  assert.equal(fullCtx.context.estimatedTurnsLeft, 0);
+  assert.equal(fullCtx.thinkingRatio, 1);
+});

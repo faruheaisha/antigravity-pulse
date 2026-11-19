@@ -82,10 +82,21 @@ if (Test-Path -LiteralPath $ConfigFile -PathType Leaf) {
     Write-Host '[已清理] 已从 config.json 移除 TokenMeter 插件与 sidecar 注册项。' -ForegroundColor Green
 }
 
-# 3. 清理运行状态文件与插件目录
-$statusFile = Join-Path $SidecarData 'meter\data\integration-status.json'
-if (Test-Path -LiteralPath $statusFile) {
-    Remove-Item -LiteralPath $statusFile -Force -ErrorAction SilentlyContinue
+# 3. 清理运行状态文件、临时租约与插件目录
+foreach ($runtimeFile in @(
+    (Join-Path $SidecarData 'meter\data\integration-status.json'),
+    (Join-Path $SidecarData 'meter\data\owner-lease.json'),
+    (Join-Path $SidecarData 'meter\data\pending-import.json')
+)) {
+    if (Test-Path -LiteralPath $runtimeFile) {
+        Remove-Item -LiteralPath $runtimeFile -Force -ErrorAction SilentlyContinue
+    }
+}
+$pluginsRoot = Split-Path -Parent $DstPlugin
+if (Test-Path -LiteralPath $pluginsRoot -PathType Container) {
+    Get-ChildItem -LiteralPath $pluginsRoot -Directory -Filter '.antigravity-token-meter-prev-*' -ErrorAction SilentlyContinue | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 if (Test-Path -LiteralPath $DstPlugin) {
     Remove-Item -LiteralPath $DstPlugin -Recurse -Force

@@ -1,14 +1,15 @@
 ﻿param(
     [switch]$NonInteractive,
     [switch]$EnableInline,
+    [switch]$DisableInline,
     [switch]$DisableLegacyPulse
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.2.8 安装器' } catch {}
+try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.2.9 安装器' } catch {}
 
 Write-Host '================================================================' -ForegroundColor Cyan
-Write-Host '  Antigravity TokenMeter v1.2.8 (MIT License)' -ForegroundColor Cyan
+Write-Host '  Antigravity TokenMeter v1.2.9 (MIT License)' -ForegroundColor Cyan
 Write-Host '  支持侧边栏面板 + 可选实验性底部内嵌状态条（不修改 app.asar）' -ForegroundColor Cyan
 Write-Host '================================================================' -ForegroundColor Cyan
 Write-Host ''
@@ -138,7 +139,11 @@ if ($cfg.Contains('plugins') -and $null -ne $cfg['plugins']) {
     foreach ($p in $cfg['plugins'].PSObject.Properties) { $pluginsMap[$p.Name] = $p.Value }
 }
 $pluginEntry = [ordered]@{}
-if ($pluginsMap.Contains('antigravity-token-meter') -and ($pluginsMap['antigravity-token-meter'] -is [PSCustomObject])) {
+if ($pluginsMap.Contains('antigravity-token-meter') -and ($null -ne $pluginsMap['antigravity-token-meter'])) {
+    if (-not ($pluginsMap['antigravity-token-meter'] -is [PSCustomObject])) {
+        Write-Host '[错误] config.json 中 plugins["antigravity-token-meter"] 类型异常，已中止安装。' -ForegroundColor Red
+        exit 4
+    }
     foreach ($p in $pluginsMap['antigravity-token-meter'].PSObject.Properties) { $pluginEntry[$p.Name] = $p.Value }
 }
 $pluginEntry['enabled'] = $true
@@ -184,9 +189,27 @@ $scEntry['enabled'] = $true
 $sidecarsMap['antigravity-token-meter/meter'] = $scEntry
 $cfg['sidecars'] = $sidecarsMap
 
-# 4. 询问是否显式开启实验性底部内嵌模式（默认 N，需明确输入 Y 或传 -EnableInline）
-$inlineEnabled = [bool]$EnableInline
-if (-not $EnableInline -and -not $NonInteractive) {
+# 4. 读取既有设置并决定是否开启实验性底部内嵌模式（非交互升级默认保留既有 inline 设置，除非显式传参）
+$SettingsFile = Join-Path $ConfigDir 'settings.json'
+$existingInline = $null
+if (Test-Path -LiteralPath $SettingsFile) {
+    try {
+        $prevSet = ([System.IO.File]::ReadAllText($SettingsFile, [System.Text.Encoding]::UTF8).TrimStart([char]0xFEFF)) | ConvertFrom-Json
+        if ($prevSet -is [PSCustomObject] -and $null -ne $prevSet.inline) {
+            $existingInline = [bool]$prevSet.inline
+        }
+    } catch {}
+}
+$inlineEnabled = if ($EnableInline) {
+    $true
+} elseif ($DisableInline) {
+    $false
+} elseif ($NonInteractive -and $null -ne $existingInline) {
+    $existingInline
+} else {
+    $false
+}
+if (-not $EnableInline -and -not $DisableInline -and -not $NonInteractive) {
     Write-Host ''
     Write-Host '  [模式选择] TokenMeter 支持两种界面形态：' -ForegroundColor Cyan
     Write-Host '    - 默认侧边栏面板：零额外启动参数，随时可用；' -ForegroundColor White
@@ -218,13 +241,13 @@ try {
         New-Item -ItemType Directory -Path $DstPlugin -Force | Out-Null
     }
 
-    # 逐项覆盖复制到目标目录（即使旧 sidecar 短时占用目录句柄也能无嵌套成功覆写）
+    # 逐项覆盖复制到目标目录（使用 -LiteralPath 枚举，彻底兼容含 [ ] 方括号路径且无目录嵌套）
     foreach ($item in @('assets', 'sidecars', 'plugin.json', 'LICENSE')) {
         $srcItem = Join-Path $SrcPlugin $item
         if (Test-Path -LiteralPath $srcItem -PathType Container) {
             $dstSub = Join-Path $DstPlugin $item
             New-Item -ItemType Directory -Path $dstSub -Force | Out-Null
-            Copy-Item -Path (Join-Path $srcItem '*') -Destination $dstSub -Recurse -Force
+            Get-ChildItem -LiteralPath $srcItem -Force | Copy-Item -Destination $dstSub -Recurse -Force
         } else {
             Copy-Item -LiteralPath $srcItem -Destination $DstPlugin -Force
         }
@@ -279,7 +302,7 @@ try {
             if (Test-Path -LiteralPath $bakItem -PathType Container) {
                 $dstSub = Join-Path $DstPlugin $item
                 New-Item -ItemType Directory -Path $dstSub -Force -ErrorAction SilentlyContinue | Out-Null
-                Copy-Item -Path (Join-Path $bakItem '*') -Destination $dstSub -Recurse -Force -ErrorAction SilentlyContinue
+                Get-ChildItem -LiteralPath $bakItem -Force -ErrorAction SilentlyContinue | Copy-Item -Destination $dstSub -Recurse -Force -ErrorAction SilentlyContinue
             } elseif (Test-Path -LiteralPath $bakItem -PathType Leaf) {
                 Copy-Item -LiteralPath $bakItem -Destination $DstPlugin -Force -ErrorAction SilentlyContinue
             }
@@ -292,7 +315,7 @@ Write-Host '      已在 config.json 中同时启用 plugin 与 sidecar！' -For
 
 Write-Host ''
 Write-Host '================================================================' -ForegroundColor Green
-Write-Host '  Antigravity TokenMeter v1.2.8 安装完成！' -ForegroundColor Green
+Write-Host '  Antigravity TokenMeter v1.2.9 安装完成！' -ForegroundColor Green
 Write-Host '================================================================' -ForegroundColor Green
 Write-Host ''
 if ($inlineEnabled) {

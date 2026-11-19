@@ -103,7 +103,16 @@ export class PreferencesStore {
         const tmp = `${this.filePath}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
         try {
           await writeFile(tmp, JSON.stringify(next, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-          await rename(tmp, this.filePath);
+          for (let i = 0; i < 3; i++) {
+            try {
+              await rename(tmp, this.filePath);
+              break;
+            } catch (err) {
+              const transient = err?.code === 'EPERM' || err?.code === 'EBUSY' || err?.code === 'EACCES';
+              if (!transient || i === 2) throw err;
+              await new Promise((r) => setTimeout(r, 40 * (i + 1)));
+            }
+          }
         } catch (err) {
           try { await unlink(tmp); } catch {}
           throw err;

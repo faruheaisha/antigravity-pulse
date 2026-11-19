@@ -223,7 +223,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.8',
+    version: '1.2.9',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -385,7 +385,7 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
 
 test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无多余空格且底栏宽窄自适应', async (t) => {
   const snapshot = {
-    version: '1.2.8',
+    version: '1.2.9',
     connected: true,
     preferences: {
       language: 'en',
@@ -478,6 +478,76 @@ test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无�
   shadow.querySelector('[data-tm-chip="context"]').dispatchEvent({ type: 'mouseover' });
   assert.ok(pop.innerHTML.includes('~9 turns left'));
   assert.equal(pop.innerHTML.includes('~ 9 turns left'), false);
+
+  win.__agTokenMeterDispose();
+});
+
+test('新对话首页无 conversationId 时照常拉取全局额度与本月用量，绝不变灰或空白', async (t) => {
+  let calledWith = 'UNSET';
+  const snapshot = {
+    version: '1.2.9',
+    connected: true,
+    conversationUnavailable: true,
+    conversation: null,
+    preferences: {
+      language: 'zh-CN',
+      theme: 'swiss',
+      showSpeed: true,
+      showCache: true,
+      showContext: true,
+      showQuota: true,
+      showToday: false,
+      showMonth: true,
+      version: 1,
+    },
+    quotas: [
+      {
+        title: 'Gemini Models',
+        fiveHour: { remainingFraction: 0.94, resetTime: new Date(Date.now() + 3600000).toISOString(), pacing: { timeRemainingFraction: 0.8, status: 'ok' } },
+        weekly: { remainingFraction: 0.90, resetTime: new Date(Date.now() + 5 * 86400000).toISOString(), pacing: { timeRemainingFraction: 0.75, status: 'ok' } },
+      },
+    ],
+    quotaPair: { title: 'Gemini Models', fiveHourFraction: 0.94, weeklyFraction: 0.90 },
+    usage: {
+      todayDate: '2026-11-20',
+      monthKey: '2026-11',
+      todayTokens: 0,
+      weekTokens: 0,
+      monthTokens: 2730000000,
+      totalTokens: 3420000000,
+      days: [],
+      modelRank: [{ model: 'Gemini 4 Neon', totalTokens: 3420000000, avgTps: 140, requests: 20000 }],
+    },
+  };
+
+  const { doc, win } = createDomEnv(snapshot);
+  win.location.pathname = '/';
+  win.__agTokenMeterApi.getSnapshot = async (cid) => {
+    calledWith = cid;
+    return snapshot;
+  };
+  t.after(() => { try { win.__agTokenMeterDispose?.(); } catch {} });
+
+  const code = buildInlineWidgetScript();
+  const fn = new Function('window', 'document', 'location', 'getComputedStyle', 'MutationObserver', 'ResizeObserver', code);
+  fn(
+    win,
+    doc,
+    win.location,
+    () => ({ display: 'flex', visibility: 'visible', opacity: '1', flexDirection: 'row', backgroundColor: '#ffffff' }),
+    class { observe() {} disconnect() {} },
+    class { observe() {} disconnect() {} }
+  );
+  await new Promise((r) => setTimeout(r, 30));
+
+  assert.equal(calledWith, null, 'home page without /c/<uuid> must still fetch global snapshot with null cid');
+  const host = doc.querySelector('#ag-token-meter-host');
+  const shadow = host.shadowRootMock;
+  const pop = shadow.getElementById('tm-popover');
+  assert.ok(shadow.querySelector('[data-tm-chip="quota"]'), 'quota chip must render on new chat home');
+  assert.ok(shadow.querySelector('[data-tm-chip="month"]'), 'month chip must render on new chat home');
+  shadow.querySelector('[data-tm-chip="month"]').dispatchEvent({ type: 'mouseover' });
+  assert.ok(pop.innerHTML.includes('2.73B'));
 
   win.__agTokenMeterDispose();
 });
