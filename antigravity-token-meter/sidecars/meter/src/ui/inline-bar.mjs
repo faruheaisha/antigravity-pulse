@@ -721,8 +721,13 @@ export function buildInlineWidgetScript() {
         var tTotal = safeInt(u.todayTokens);
         var mTotal = safeInt(u.monthTokens);
         var shareText = mTotal > 0 ? Math.min(100, Math.round((tTotal / mTotal) * 100)) + '%' : '--';
-        var models = Array.isArray(u.todayByModel) ? u.todayByModel.slice(0, 4) : [];
-        var topMax = models.length ? Math.max(1, safeInt(models[0].totalTokens)) : 1;
+        var modelsAll = Array.isArray(u.todayByModel) ? u.todayByModel : [];
+        var models = modelsAll.slice(0, 4).map(function(m) { return { model: m.model, totalTokens: safeInt(m.totalTokens) }; });
+        var shownSum = models.reduce(function(acc, m) { return acc + m.totalTokens; }, 0);
+        if (tTotal > shownSum && models.length > 0) {
+          models.push({ model: t('otherModels'), totalTokens: tTotal - shownSum });
+        }
+        var topMax = models.length ? Math.max(1, models[0].totalTokens) : 1;
         var modelBars = models.map(function(m) {
           var pct = Math.max(3, Math.round((safeInt(m.totalTokens) / topMax) * 100));
           return '<div class="tm-mbar-row">' +
@@ -1497,9 +1502,11 @@ export function buildInlineWidgetScript() {
           }),
         });
       } else if (topSeriesModels.length > 0) {
-        // 默认同屏多模型平滑曲线对比（与 ZCode 每日模型趋势一致）
+        // 默认同屏多模型平滑曲线对比；若当日存在 Top 5 之外的长尾模型，自动聚合为「其他模型」确保合计与热力图 100% 严丝合缝
+        var topSet = Object.create(null);
         for (var mi = 0; mi < topSeriesModels.length; mi++) {
           var mName = topSeriesModels[mi].model;
+          topSet[mName] = true;
           seriesList.push({
             label: mName,
             color: Z_PALETTE[mi % Z_PALETTE.length],
@@ -1507,6 +1514,20 @@ export function buildInlineWidgetScript() {
               var rec = daysObj[k];
               return rec && rec.byModel && Object.hasOwn(rec.byModel, mName) ? safeInt(rec.byModel[mName]) : 0;
             }),
+          });
+        }
+        var otherValues = dateKeys.map(function(k, idx) {
+          var rec = daysObj[k];
+          if (!rec) return 0;
+          var topSum = 0;
+          for (var ti = 0; ti < seriesList.length; ti++) topSum += seriesList[ti].values[idx] || 0;
+          return Math.max(0, safeInt(rec.total) - topSum);
+        });
+        if (otherValues.some(function(v) { return v > 0; })) {
+          seriesList.push({
+            label: t('otherModels'),
+            color: '#94a3b8',
+            values: otherValues,
           });
         }
       } else {

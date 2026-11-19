@@ -223,7 +223,7 @@ function createDomEnv(snapshot) {
 
 test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互不串栏', async (t) => {
   const snapshot = {
-    version: '1.2.6',
+    version: '1.2.7',
     connected: true,
     preferences: {
       language: 'zh-CN',
@@ -385,7 +385,7 @@ test('buildInlineWidgetScript 一格一卡按需聚焦弹窗且悬停切换互�
 
 test('英文模式浮卡排版防溢出：进度条短标 5h/7d 无重叠、无多余空格且底栏宽窄自适应', async (t) => {
   const snapshot = {
-    version: '1.2.6',
+    version: '1.2.7',
     connected: true,
     preferences: {
       language: 'en',
