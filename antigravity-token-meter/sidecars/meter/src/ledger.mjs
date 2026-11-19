@@ -9,11 +9,12 @@
  * 5. 将 lifetimeTotal 永久累计与 400 天滚动日桶分离统计。
  */
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 const MAX_RECORDS = 10000;
 const MAX_DAYS = 400;
+const MAX_APPLIED_IMPORTS = 64;
 
 function safeInt(v) {
   const n = Number(v);
@@ -35,6 +36,8 @@ function createEmptyState() {
   return {
     schema: 2,
     lifetimeTotal: 0,
+    importedUntil: null,
+    appliedImports: [],
     recordOrder: [],
     records: Object.create(null),
     days: Object.create(null),
@@ -59,6 +62,15 @@ function rebuildSafeState(parsed) {
   }
 
   next.lifetimeTotal = safeInt(parsed.lifetimeTotal);
+  next.importedUntil = typeof parsed.importedUntil === 'string' && Number.isFinite(Date.parse(parsed.importedUntil))
+    ? parsed.importedUntil
+    : null;
+  if (Array.isArray(parsed.appliedImports)) {
+    next.appliedImports = parsed.appliedImports
+      .filter((v) => typeof v === 'string' && v.trim())
+      .map((v) => v.trim().slice(0, 80))
+      .slice(-MAX_APPLIED_IMPORTS);
+  }
   next.updatedAt = typeof parsed.updatedAt === 'string' ? parsed.updatedAt : null;
 
   if (parsed.days && typeof parsed.days === 'object' && !Array.isArray(parsed.days)) {
@@ -154,9 +166,195 @@ export class UsageLedger {
             this.corrupted = true;
           }
         }
+        if (!this.readOnly && !this.corrupted && this.filePath) {
+          await this._consumePendingImport();
+        }
       })();
     }
     return this._loadPromise;
+  }
+
+  /**
+   * 校验并应用离线生成的聚合历史导入包（幂等防重，支持自动处理导入前重叠试运行账本）。
+   * @param {any} bundle
+   * @param {{ skipFlush?: boolean }} [options]
+   */
+  async applyImportBundle(bundle, { skipFlush = false } = {}) {
+    if (!skipFlush) await this.load();
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle) || bundle.schema !== 1) {
+      return { applied: false, reason: 'invalid_bundle' };
+    }
+    const batchId = typeof bundle.batchId === 'string' ? bundle.batchId.trim().slice(0, 80) : '';
+    if (!batchId) return { applied: false, reason: 'missing_batch_id' };
+    if (this.state.appliedImports.includes(batchId)) {
+      return { applied: false, reason: 'already_applied' };
+    }
+
+    const cutoffIso = typeof bundle.importedUntil === 'string' && Number.isFinite(Date.parse(bundle.importedUntil))
+      ? new Date(Date.parse(bundle.importedUntil)).toISOString()
+      : null;
+
+    // 首次导入且开启重叠替换时，仅保留晚于截断日的新日期增量，以旧账本为干净基线防双记
+    const shouldReplaceOverlap =
+      bundle.replaceOverlappingBeforeCutoff === true &&
+      !this.state.importedUntil &&
+      cutoffIso !== null;
+
+    let futureDays = null;
+    if (shouldReplaceOverlap) {
+      const cutoffDateKey = toLocalDateKey(cutoffIso);
+      futureDays = Object.create(null);
+      for (const [k, entry] of Object.entries(this.state.days)) {
+        if (k > cutoffDateKey) futureDays[k] = entry;
+      }
+      this.state.lifetimeTotal = 0;
+      this.state.recordOrder = [];
+      this.state.records = Object.create(null);
+      this.state.days = Object.create(null);
+      this.state.models = Object.create(null);
+    }
+
+    let addedDayTotal = 0;
+    if (bundle.days && typeof bundle.days === 'object' && !Array.isArray(bundle.days)) {
+      for (const [dateKey, entry] of Object.entries(bundle.days)) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey) || !entry || typeof entry !== 'object') continue;
+        const total = safeInt(entry.total);
+        const input = safeInt(entry.input);
+        const cacheRead = safeInt(entry.cacheRead);
+        const output = safeInt(entry.output);
+        const requests = safeInt(entry.requests);
+        if (total <= 0 && requests <= 0) continue;
+
+        if (!Object.hasOwn(this.state.days, dateKey)) {
+          this.state.days[dateKey] = {
+            total: 0,
+            input: 0,
+            cacheRead: 0,
+            output: 0,
+            requests: 0,
+            byModel: Object.create(null),
+          };
+        }
+        const d = this.state.days[dateKey];
+        d.total += total;
+        d.input += input;
+        d.cacheRead += cacheRead;
+        d.output += output;
+        d.requests += requests;
+        if (entry.byModel && typeof entry.byModel === 'object' && !Array.isArray(entry.byModel)) {
+          for (const [mKey, mVal] of Object.entries(entry.byModel)) {
+            const safeModel = String(mKey || 'Unknown').slice(0, 128);
+            d.byModel[safeModel] = (d.byModel[safeModel] || 0) + safeInt(mVal);
+          }
+        }
+        addedDayTotal += total;
+      }
+    }
+
+    if (bundle.models && typeof bundle.models === 'object' && !Array.isArray(bundle.models)) {
+      for (const [mKey, m] of Object.entries(bundle.models)) {
+        if (!m || typeof m !== 'object') continue;
+        const safeModel = String(mKey || 'Unknown').slice(0, 128);
+        if (!Object.hasOwn(this.state.models, safeModel)) {
+          this.state.models[safeModel] = {
+            total: 0,
+            input: 0,
+            cacheRead: 0,
+            output: 0,
+            thinking: 0,
+            requests: 0,
+            timedOutput: 0,
+            streamingSec: 0,
+          };
+        }
+        const dst = this.state.models[safeModel];
+        dst.total += safeInt(m.total);
+        dst.input += safeInt(m.input);
+        dst.cacheRead += safeInt(m.cacheRead);
+        dst.output += safeInt(m.output);
+        dst.thinking += safeInt(m.thinking);
+        dst.requests += safeInt(m.requests);
+        dst.timedOutput += safeInt(m.timedOutput);
+        dst.streamingSec += safeFloat(m.streamingSec);
+      }
+    }
+
+    const bundleLifetime = safeInt(bundle.lifetimeTotal);
+    this.state.lifetimeTotal += Math.max(bundleLifetime, addedDayTotal);
+
+    // 还原严格晚于截断日期的未来增量日桶
+    if (futureDays) {
+      for (const [dateKey, entry] of Object.entries(futureDays)) {
+        if (!Object.hasOwn(this.state.days, dateKey)) {
+          this.state.days[dateKey] = entry;
+          this.state.lifetimeTotal += safeInt(entry.total);
+          for (const [mKey, mVal] of Object.entries(entry.byModel || {})) {
+            const safeModel = String(mKey || 'Unknown').slice(0, 128);
+            if (!Object.hasOwn(this.state.models, safeModel)) {
+              this.state.models[safeModel] = {
+                total: 0, input: 0, cacheRead: 0, output: 0, thinking: 0, requests: 0, timedOutput: 0, streamingSec: 0,
+              };
+            }
+            this.state.models[safeModel].total += safeInt(mVal);
+          }
+        }
+      }
+    }
+
+    if (cutoffIso) {
+      const prevMs = this.state.importedUntil ? Date.parse(this.state.importedUntil) : 0;
+      const nextMs = Date.parse(cutoffIso);
+      if (nextMs > prevMs) this.state.importedUntil = cutoffIso;
+    }
+
+    this.state.appliedImports.push(batchId);
+    if (this.state.appliedImports.length > MAX_APPLIED_IMPORTS) {
+      this.state.appliedImports = this.state.appliedImports.slice(-MAX_APPLIED_IMPORTS);
+    }
+
+    const dayKeys = Object.keys(this.state.days).sort();
+    if (dayKeys.length > MAX_DAYS) {
+      for (const k of dayKeys.slice(0, dayKeys.length - MAX_DAYS)) {
+        delete this.state.days[k];
+      }
+    }
+
+    this.state.updatedAt = new Date().toISOString();
+    this._revision++;
+    if (!skipFlush) {
+      await this.flush();
+    }
+    return { applied: true, batchId, replacedOverlap: shouldReplaceOverlap };
+  }
+
+  /**
+   * 启动加载时自动吸纳同目录的 pending-import.json，确保即使在宿主运行期间执行导入脚本也不会被旧内存覆写。
+   */
+  async _consumePendingImport() {
+    const pendingPath = join(dirname(this.filePath), 'pending-import.json');
+    let raw;
+    try {
+      raw = await readFile(pendingPath, 'utf8');
+    } catch {
+      return;
+    }
+    try {
+      const bundle = JSON.parse(raw.replace(/^\uFEFF/, ''));
+      const res = await this.applyImportBundle(bundle, { skipFlush: true });
+      if (res.applied) {
+        await this._flushUnlocked();
+      }
+      if (res.applied || res.reason === 'already_applied') {
+        const appliedPath = join(dirname(this.filePath), 'pending-import.applied.json');
+        try {
+          await rename(pendingPath, appliedPath);
+        } catch {
+          try { await unlink(pendingPath); } catch {}
+        }
+      }
+    } catch {
+      // 待导入包异常时静默忽略，不影响主账本启动
+    }
   }
 
   _applyDelta(dateKey, model, delta, isNewRequest) {
@@ -278,11 +476,38 @@ export class UsageLedger {
     return changed;
   }
 
+  async getImportedUntilMs() {
+    await this.load();
+    if (!this.state.importedUntil) return 0;
+    const ms = Date.parse(this.state.importedUntil);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+
+  /**
+   * 写入历史迁移水位线并安全落盘（供一次性历史账本导入工具调用，防后台回填重复记账）。
+   */
+  async setImportedUntil(isoString) {
+    await this.load();
+    if (typeof isoString !== 'string' || !Number.isFinite(Date.parse(isoString))) return;
+    const prevMs = this.state.importedUntil ? Date.parse(this.state.importedUntil) : 0;
+    const nextMs = Date.parse(isoString);
+    if (nextMs > prevMs) {
+      this.state.importedUntil = new Date(nextMs).toISOString();
+      this.state.updatedAt = new Date().toISOString();
+      this._revision++;
+      await this.flush();
+    }
+  }
+
   /**
    * 基于版本号的循环原子刷盘：保证在途写完后若期间又有新写入会自动续刷，绝不丢账。
    */
   async flush() {
     await this.load();
+    return this._flushUnlocked();
+  }
+
+  async _flushUnlocked() {
     if (this.readOnly || this.corrupted || !this.filePath) return;
     if (this._flushPromise) {
       await this._flushPromise;
@@ -331,6 +556,10 @@ export class UsageLedger {
     let todayRequests = 0;
     let weekTokens = 0;
     let monthTokens = 0;
+    let monthInput = 0;
+    let monthCacheRead = 0;
+    let monthOutput = 0;
+    let monthRequests = 0;
     const daysList = [];
 
     for (const key of Object.keys(this.state.days).sort()) {
@@ -341,7 +570,13 @@ export class UsageLedger {
         todayRequests = safeInt(entry?.requests);
       }
       if (weekKeys.has(key)) weekTokens += t;
-      if (key.startsWith(monthPrefix)) monthTokens += t;
+      if (key.startsWith(monthPrefix)) {
+        monthTokens += t;
+        monthInput += safeInt(entry?.input);
+        monthCacheRead += safeInt(entry?.cacheRead);
+        monthOutput += safeInt(entry?.output);
+        monthRequests += safeInt(entry?.requests);
+      }
       daysList.push({
         date: key,
         total: t,
@@ -371,7 +606,13 @@ export class UsageLedger {
       todayRequests,
       weekTokens,
       monthTokens,
+      monthInput,
+      monthCacheRead,
+      monthOutput,
+      monthRequests,
+      activeDays: daysList.filter((d) => d.total > 0).length,
       totalTokens: safeInt(this.state.lifetimeTotal),
+      importedUntil: this.state.importedUntil,
       days: daysList.slice(-365),
       modelRank,
       corrupted: this.corrupted,

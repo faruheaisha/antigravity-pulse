@@ -124,6 +124,28 @@
     .strip { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--hairline); padding-top: 9px; }
     .strip-cell { padding: 0 9px; border-left: 1px solid var(--hairline); }
     .strip-cell:first-child { padding-left: 0; border-left: none; }
+    .usage-strip { display: grid; grid-template-columns: repeat(4, 1fr); padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--hairline); }
+    .usage-cell { padding: 0 7px; border-left: 1px solid var(--hairline); min-width: 0; }
+    .usage-cell:first-child { padding-left: 0; border-left: none; }
+    .usage-k { font-size: 10px; color: var(--muted); margin-bottom: 2px; white-space: nowrap; }
+    .usage-v { font-family: var(--mono); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: var(--text); }
+    .heat { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2.5px; }
+    .heat-col { display: grid; grid-template-rows: repeat(7, 8px); gap: 2.5px; }
+    .h-cell { border-radius: 1.5px; background: var(--elev); }
+    .h-cell.l1 { background: rgba(24, 24, 27, 0.18); }
+    .h-cell.l2 { background: rgba(24, 24, 27, 0.40); }
+    .h-cell.l3 { background: rgba(24, 24, 27, 0.68); }
+    .h-cell.l4 { background: #18181b; }
+    @media (prefers-color-scheme: dark) {
+      .h-cell.l1 { background: rgba(244, 244, 245, 0.16); }
+      .h-cell.l2 { background: rgba(244, 244, 245, 0.34); }
+      .h-cell.l3 { background: rgba(244, 244, 245, 0.62); }
+      .h-cell.l4 { background: #f4f4f5; }
+    }
+    html[data-style="mono"] .h-cell.l1 { background: rgba(16, 185, 129, 0.22); }
+    html[data-style="mono"] .h-cell.l2 { background: rgba(16, 185, 129, 0.44); }
+    html[data-style="mono"] .h-cell.l3 { background: rgba(16, 185, 129, 0.72); }
+    html[data-style="mono"] .h-cell.l4 { background: #10b981; }
     .kpi-label { font-size: 10.5px; color: var(--muted); margin-bottom: 2px; }
     .kpi-val { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
     .kpi-ctx-row { display: inline-flex; align-items: center; gap: 5px; }
@@ -196,6 +218,17 @@
       <div class="strip-cell"><div class="kpi-label" data-k="cacheHit"></div><div class="kpi-val" id="k-cache">--</div></div>
       <div class="strip-cell"><div class="kpi-label" data-k="context"></div><div class="kpi-val kpi-ctx-row"><span id="k-ctx-ring"></span><span id="k-ctx">--</span></div></div>
     </div>
+  </div>
+
+  <div class="card">
+    <div class="sec-title"><span data-k="usageOverview"></span><span id="u-meta" style="font-family:var(--mono);font-size:10px;"></span></div>
+    <div class="usage-strip">
+      <div class="usage-cell"><div class="usage-k" data-k="today"></div><div class="usage-v" id="u-today">0</div></div>
+      <div class="usage-cell"><div class="usage-k" data-k="week"></div><div class="usage-v" id="u-week">0</div></div>
+      <div class="usage-cell"><div class="usage-k" data-k="month"></div><div class="usage-v" id="u-month">0</div></div>
+      <div class="usage-cell"><div class="usage-k" data-k="lifetime"></div><div class="usage-v" id="u-total">0</div></div>
+    </div>
+    <div class="heat" id="heatmap"></div>
   </div>
 
   <div class="card">

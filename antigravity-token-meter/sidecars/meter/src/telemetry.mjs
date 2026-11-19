@@ -474,14 +474,16 @@ export function computeConversationTelemetry({
       stepTag;
 
     const hashedKey = hashEventKey(String(cascadeId || 'default'), rawStableId);
-    const ts = typeof cm.requestTime === 'string' && Number.isFinite(Date.parse(cm.requestTime))
-      ? cm.requestTime
-      : fallbackDate;
+    const rawTs = [cm.requestTime, cm.startTime, cm.createdAt, cm.chatStartMetadata?.createdAt]
+      .find((v) => typeof v === 'string' && Number.isFinite(Date.parse(v)));
+    const hasExactTimestamp = Boolean(rawTs);
+    const ts = rawTs || fallbackDate;
 
     // 同一请求后续出现更完整的最终快照时覆盖旧中间态
     deduped.set(hashedKey, {
       id: hashedKey,
       timestamp: ts,
+      hasExactTimestamp,
       model: modelName,
       inputTokens: uncachedInput,
       cacheReadTokens: cacheRead,
@@ -552,6 +554,7 @@ export function computeConversationTelemetry({
     ledgerEvents.push({
       id: item.id,
       timestamp: item.timestamp,
+      hasExactTimestamp: item.hasExactTimestamp,
       model: item.model,
       inputTokens: item.inputTokens,
       cacheReadTokens: item.cacheReadTokens,

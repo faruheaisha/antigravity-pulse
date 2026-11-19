@@ -24,7 +24,7 @@ export function buildInlineWidgetScript() {
     var state = {
       disposed: false,
       snapshot: null,
-      prefs: { language: 'zh-CN', theme: 'swiss', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, version: 0 },
+      prefs: { language: 'zh-CN', theme: 'swiss', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, showMonth: true, version: 0 },
       confirmedPrefVersion: 0,
       popoverOpen: false,
       pinned: false,
@@ -158,6 +158,7 @@ export function buildInlineWidgetScript() {
       if (conv.context && conv.context.usedFraction != null) parts.push('Ctx ' + fmtPct(conv.context.usedFraction));
       if (qText !== '--') parts.push('Quota ' + qText);
       if (usage.todayTokens) parts.push('Today ' + fmtTokens(usage.todayTokens));
+      if (usage.monthTokens) parts.push('Month ' + fmtTokens(usage.monthTokens));
       return parts.join(' | ');
     }
 
@@ -279,7 +280,15 @@ export function buildInlineWidgetScript() {
         if (!rightGroup && footer.children.length >= 2) {
           rightGroup = footer.lastElementChild;
         }
-        if (rightGroup && fw >= 620) {
+        var enabledCount =
+          (state.prefs.showSpeed !== false ? 1 : 0) +
+          (state.prefs.showCache !== false ? 1 : 0) +
+          (state.prefs.showContext !== false ? 1 : 0) +
+          (state.prefs.showQuota !== false ? 1 : 0) +
+          (state.prefs.showToday === true ? 1 : 0) +
+          (state.prefs.showMonth === true ? 1 : 0);
+        var minInlineWidth = enabledCount >= 6 ? 760 : enabledCount >= 5 ? 680 : 620;
+        if (rightGroup && fw >= minInlineWidth) {
           return { parent: footer, before: rightGroup, placement: 'inline-footer' };
         }
       }
@@ -600,6 +609,11 @@ export function buildInlineWidgetScript() {
         .tm-sub-cell:first-child { padding-left: 0; border-left: none; }
         .tm-sub-k { font-size: 10px; color: var(--tm-muted); margin-bottom: 2px; }
         .tm-sub-v { font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--tm-text); letter-spacing: -0.015em; }
+        .tm-usage-strip { display: grid; grid-template-columns: repeat(4, 1fr); padding: 2px 0; }
+        .tm-usage-cell { padding: 0 7px; border-left: 1px solid var(--tm-hairline); }
+        .tm-usage-cell:first-child { padding-left: 0; border-left: none; }
+        .tm-usage-k { font-size: 9.5px; color: var(--tm-muted); margin-bottom: 2px; }
+        .tm-usage-v { font-family: var(--tm-mono); font-size: 11.5px; font-weight: 600; color: var(--tm-text); }
 
         .tm-micro-row { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 10px; color: var(--tm-muted); margin-bottom: 5px; }
         .tm-fresh { display: inline-flex; align-items: center; gap: 4px; }
@@ -738,8 +752,9 @@ export function buildInlineWidgetScript() {
       var showContext = prefs.showContext !== false;
       var showQuota = prefs.showQuota !== false && hasQuota;
       var showToday = prefs.showToday === true && Boolean(usage);
+      var showMonth = prefs.showMonth === true && Boolean(usage);
       var langKey = prefs.language === 'en' ? 'en' : 'zh-CN';
-      var layoutKey = [langKey, showSpeed ? 1 : 0, showCache ? 1 : 0, showContext ? 1 : 0, showQuota ? 1 : 0, showToday ? 1 : 0].join(':');
+      var layoutKey = [langKey, showSpeed ? 1 : 0, showCache ? 1 : 0, showContext ? 1 : 0, showQuota ? 1 : 0, showToday ? 1 : 0, showMonth ? 1 : 0].join(':');
 
       var chipsEl = shadow.getElementById('tm-chips');
       if (chipsEl) {
@@ -760,6 +775,9 @@ export function buildInlineWidgetScript() {
           }
           if (showToday) {
             chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val" data-tm-v="today">--</span></button>');
+          }
+          if (showMonth) {
+            chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1">' + (chipItems.length === 0 ? barStar : '') + '<span class="tm-label">' + escapeHtml(t('month')) + '</span><span class="tm-val" data-tm-v="month">--</span></button>');
           }
           chipsEl.innerHTML = chipItems.length
             ? chipItems.join('<span class="tm-sep" aria-hidden="true"></span>')
@@ -797,6 +815,8 @@ export function buildInlineWidgetScript() {
         }
         var todayEl = chipsEl.querySelector('[data-tm-v="today"]');
         if (todayEl) todayEl.textContent = usage ? fmtTokens(usage.todayTokens) : '--';
+        var monthEl = chipsEl.querySelector('[data-tm-v="month"]');
+        if (monthEl) monthEl.textContent = usage ? fmtTokens(usage.monthTokens) : '--';
         syncContextRingEl(chipsEl.querySelector('[data-tm-ring="bar"]'), ctxFrac);
       }
 
@@ -849,7 +869,7 @@ export function buildInlineWidgetScript() {
             '</div>' +
             '<div class="tm-hero">' +
               '<div class="tm-hero-main"><span class="tm-hero-num">' + escapeHtml(heroNum) + '</span><span class="tm-hero-unit">' + escapeHtml(t('speedUnit')) + '</span></div>' +
-              '<div class="tm-hero-meta">' + escapeHtml(t('today')) + ' <b>' + escapeHtml(fmtTokens(usage && usage.todayTokens)) + '</b><br/>' + safeInt(conv && conv.measuredRequests) + ' ' + escapeHtml(t('requests')) + '</div>' +
+              '<div class="tm-hero-meta">' + escapeHtml(t('today')) + ' <b>' + escapeHtml(fmtTokens(usage && usage.todayTokens)) + '</b><br/>' + escapeHtml(t('month')) + ' <b>' + escapeHtml(fmtTokens(usage && usage.monthTokens)) + '</b></div>' +
             '</div>' +
             '<div class="tm-spark-wrap">' + buildSparklineSvg(conv && conv.sparkline) + '</div>' +
             '<div class="tm-sub-strip">' +
@@ -858,6 +878,13 @@ export function buildInlineWidgetScript() {
               '<div class="tm-sub-cell"><div class="tm-sub-k">' + escapeHtml(t('cacheHit')) + '</div><div class="tm-sub-v">' + escapeHtml(fmtPct(cacheVal)) + '</div></div>' +
             '</div>' +
             buildTokenBreakdownHtml(conv) +
+            '<div class="tm-sec"><div class="tm-sec-title"><span>' + escapeHtml(t('usageOverview')) + '</span><span>' + safeInt(usage && usage.monthRequests) + ' ' + escapeHtml(t('requests')) + '</span></div>' +
+              '<div class="tm-usage-strip">' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('today')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.todayTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('week')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.weekTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('month')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.monthTokens)) + '</div></div>' +
+                '<div class="tm-usage-cell"><div class="tm-usage-k">' + escapeHtml(t('lifetime')) + '</div><div class="tm-usage-v">' + escapeHtml(fmtTokens(usage && usage.totalTokens)) + '</div></div>' +
+              '</div></div>' +
             (qHtml ? '<div class="tm-sec"><div class="tm-sec-title"><span>' + escapeHtml(t('quotaTitle')) + '</span><span style="font-size:9.5px;">' + escapeHtml(t('paceLegend')) + '</span></div>' + qHtml + '</div>' : '') +
             '<div class="tm-foot">' +
               '<span class="tm-foot-ctx">' + ctxFoot + '</span>' +
@@ -952,6 +979,7 @@ export function buildInlineWidgetScript() {
         ['showContext', t('optContext')],
         ['showQuota', t('optQuota')],
         ['showToday', t('optToday')],
+        ['showMonth', t('optMonth')],
       ].map(function(pair) {
         var on = Boolean(state.prefs[pair[0]]);
         return '<label class="tm-pill ' + (on ? 'on' : '') + '"><input type="checkbox" data-pref-key="' + escapeHtml(pair[0]) + '"' + (on ? ' checked' : '') + '/><span class="tm-pill-dot"></span>' + escapeHtml(pair[1]) + '</label>';
@@ -1027,6 +1055,7 @@ export function buildInlineWidgetScript() {
           }
         }
       } catch {}
+      ensureMounted();
       renderBar();
       if (state.modalOpen) renderModal();
     }

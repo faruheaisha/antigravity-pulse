@@ -28,7 +28,7 @@ import { buildInlineWidgetScript } from './src/ui/inline-bar.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = JSON.parse(readFileSync(join(HERE, 'package.json'), 'utf8'));
-const VERSION = String(PKG.version || '1.1.3');
+const VERSION = String(PKG.version || '1.2.0');
 const IS_HOST_SIDECAR = Boolean(process.env.ANTIGRAVITY_SIDECAR_WEB_PORT);
 const IS_PREVIEW = process.argv.includes('--preview');
 
@@ -154,7 +154,19 @@ async function collectSnapshot({ conversationId = undefined } = {}) {
         fallbackDate,
       });
       if (!IS_PREVIEW && (!ownerLease || ownerLease.owned)) {
-        try { await ledger.ingest(computed.ledgerEvents); } catch {}
+        try {
+          const importedUntilMs = await ledger.getImportedUntilMs();
+          const freshEvents = importedUntilMs > 0
+            ? computed.ledgerEvents.filter((ev) => {
+                const t = Date.parse(ev.timestamp || '');
+                if (!Number.isFinite(t)) return false;
+                return t > importedUntilMs;
+              })
+            : computed.ledgerEvents;
+          if (freshEvents.length > 0) {
+            await ledger.ingest(freshEvents);
+          }
+        } catch {}
       }
       // 剔除内部 ledgerEvents 与原始 cascadeId，不向 UI 透传原始会话 ID
       const { ledgerEvents: _omitEvents, cascadeId: _omitCid, ...publicConv } = computed;
@@ -244,6 +256,68 @@ if (IS_HOST_SIDECAR) {
 
   await app.run();
 
+  const backfilledMtime = new Map();
+  let backfillRunning = false;
+  let backfillTimer = null;
+
+  /**
+   * 后台温和回填本机历史会话的 Token 消耗（仅持有写租约时执行，严格跳过 importedUntil 之前已导入的历史防重复）。
+   */
+  async function backfillHistoricalTrajectories() {
+    if (backfillRunning || IS_PREVIEW || (ownerLease && !ownerLease.owned)) return;
+    backfillRunning = true;
+    try {
+      const { projection } = await fetchUserStatusProjection();
+      const labelMap = projection?.labelMap || new Map();
+      const trajs = await lsClient.getAllTrajectories();
+      const summaries = trajs?.trajectorySummaries || {};
+      const importedUntilMs = await ledger.getImportedUntilMs();
+      const cutoffMs = Math.max(Date.now() - 120 * 86400 * 1000, importedUntilMs);
+
+      const candidates = Object.entries(summaries)
+        .filter(([cid, meta]) => {
+          if (!UUID_RE.test(cid)) return false;
+          const mtime = Date.parse(meta?.lastModifiedTime || '');
+          if (Number.isFinite(mtime) && mtime <= cutoffMs) return false;
+          return backfilledMtime.get(cid) !== (meta?.lastModifiedTime || '1');
+        })
+        .sort(([, a], [, b]) => Date.parse(b?.lastModifiedTime || 0) - Date.parse(a?.lastModifiedTime || 0))
+        .slice(0, 240);
+
+      for (const [cid, meta] of candidates) {
+        if (ownerLease && !ownerLease.owned) break;
+        try {
+          const gmRes = await lsClient.getGeneratorMetadata(cid);
+          const computed = computeConversationTelemetry({
+            cascadeId: cid,
+            status: meta?.status || '',
+            generatorMetadata: gmRes?.generatorMetadata || [],
+            modelLabelMap: labelMap,
+            fallbackDate: meta?.lastModifiedTime || new Date().toISOString(),
+          });
+          const convCreatedMs = Date.parse(meta?.createdTime || '');
+          const events = importedUntilMs > 0
+            ? computed.ledgerEvents.filter((ev) => {
+                const t = Date.parse(ev.timestamp || '');
+                if (!Number.isFinite(t) || t <= importedUntilMs) return false;
+                if (ev.hasExactTimestamp) return true;
+                return Number.isFinite(convCreatedMs) ? convCreatedMs > importedUntilMs : false;
+              })
+            : computed.ledgerEvents;
+          if (events.length > 0) {
+            await ledger.ingest(events);
+          }
+          backfilledMtime.set(cid, meta?.lastModifiedTime || '1');
+        } catch {}
+        await new Promise((r) => setTimeout(r, 120));
+      }
+    } catch {
+      // 历史回填属于增强能力，失败静默忽略，不影响实时监控
+    } finally {
+      backfillRunning = false;
+    }
+  }
+
   let claimRetryTimer = null;
   const activateOwnership = () => {
     if (claimRetryTimer) {
@@ -256,6 +330,13 @@ if (IS_HOST_SIDECAR) {
     ownerLease.startHeartbeat(() => {
       void bridge.detachAll();
     });
+    if (!backfillTimer) {
+      backfillTimer = setTimeout(() => {
+        backfillTimer = null;
+        void backfillHistoricalTrajectories();
+      }, 2500);
+      backfillTimer.unref?.();
+    }
   };
 
   if (await ownerLease.claim()) {
@@ -279,6 +360,7 @@ if (IS_HOST_SIDECAR) {
         const guard = setTimeout(() => process.exit(0), 8000);
         guard.unref?.();
         if (claimRetryTimer) { clearInterval(claimRetryTimer); claimRetryTimer = null; }
+        if (backfillTimer) { clearTimeout(backfillTimer); backfillTimer = null; }
         await bridge.stop();
         try { await ledger.flush(); } catch {}
         await ownerLease.release();

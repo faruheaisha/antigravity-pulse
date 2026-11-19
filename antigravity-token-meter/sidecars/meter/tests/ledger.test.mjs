@@ -40,3 +40,55 @@ test('UsageLedger 并发 ingest 不丢写、支持差值 upsert、防 __proto__ 
   assert.equal(brokenLedger.corrupted, true);
   assert.equal(await readFile(brokenFile, 'utf8'), '{corrupted-json');
 });
+
+test('UsageLedger 支持聚合历史导入、重叠替换、幂等防重与 pending-import.json 自动吸纳', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'tm-ledger-import-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = join(dir, 'ledger-v1.json');
+
+  // 预先模拟用户当天试跑记入了一笔重叠数据，以及次日一笔全新数据
+  const seed = new UsageLedger(file);
+  await seed.ingest([
+    { id: 'overlap-1', timestamp: '2026-11-19T14:40:00.000Z', model: 'Gemini 4 Neon', inputTokens: 500, cacheReadTokens: 500, outputTokens: 100 },
+    { id: 'future-1', timestamp: '2026-11-20T01:00:00.000Z', model: 'Gemini 4 Neon', inputTokens: 200, cacheReadTokens: 300, outputTokens: 50 },
+  ]);
+
+  // 写入 pending-import.json 模拟 sidecar 运行中落盘保护队列
+  const bundle = {
+    schema: 1,
+    batchId: 'legacy-usage-v1-testbatch',
+    source: 'legacy-usage-v1',
+    importedUntil: '2026-11-19T14:33:04.257Z',
+    replaceOverlappingBeforeCutoff: true,
+    lifetimeTotal: 150000,
+    days: {
+      '2026-10-15': { total: 50000, input: 10000, cacheRead: 35000, output: 5000, requests: 12, byModel: { 'Gemini 4 Argon': 50000 } },
+      '2026-11-19': { total: 100000, input: 20000, cacheRead: 70000, output: 10000, requests: 30, byModel: { 'Gemini 4 Argon': 100000 } },
+    },
+    models: {
+      'Gemini 4 Argon': { total: 150000, input: 30000, cacheRead: 105000, output: 15000, thinking: 3000, requests: 42, timedOutput: 0, streamingSec: 0 },
+    },
+  };
+  await writeFile(join(dir, 'pending-import.json'), JSON.stringify(bundle), 'utf8');
+
+  // readOnly 模式不得消费 pending-import.json
+  const roLedger = new UsageLedger(file, { readOnly: true });
+  const roSnap = await roLedger.snapshot(new Date('2026-11-20T02:00:00.000Z'));
+  assert.equal(roSnap.totalTokens, 1650);
+
+  // 正常读写实例启动 load 自动吸纳 pending-import.json 并原子归档
+  const live = new UsageLedger(file);
+  const snap = await live.snapshot(new Date('2026-11-20T02:00:00.000Z'));
+  // 2026-11-19 试跑重叠 1100 被干净替换为旧账本 100000，2026-11-20 新数据 550 完整保留 -> 累计 150550
+  assert.equal(snap.totalTokens, 150550);
+  assert.equal(snap.monthTokens, 100550);
+  assert.equal(snap.monthRequests, 31);
+  assert.equal(snap.activeDays, 3);
+  assert.equal(snap.importedUntil, '2026-11-19T14:33:04.257Z');
+  assert.equal(await live.getImportedUntilMs(), Date.parse('2026-11-19T14:33:04.257Z'));
+
+  // 重复应用同一 batchId 必须幂等跳过
+  const dup = await live.applyImportBundle(bundle);
+  assert.equal(dup.applied, false);
+  assert.equal(dup.reason, 'already_applied');
+});

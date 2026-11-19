@@ -13,7 +13,7 @@
   const DICT = window.__AG_TM_I18N__ || { 'zh-CN': { diag: {} }, en: { diag: {} } };
   const THEMES = ['swiss', 'glass', 'mono'];
   let lang = 'zh-CN';
-  let prefs = { language: 'zh-CN', theme: 'swiss', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, version: 0 };
+  let prefs = { language: 'zh-CN', theme: 'swiss', showSpeed: true, showCache: true, showContext: true, showQuota: true, showToday: false, showMonth: true, version: 0 };
   let confirmedVersion = 0;
   let reqSeq = 0;
 
@@ -131,7 +131,8 @@
   function renderToggles() {
     const items = [
       ['showSpeed', t('optSpeed')], ['showCache', t('optCache')],
-      ['showContext', t('optContext')], ['showQuota', t('optQuota')], ['showToday', t('optToday')],
+      ['showContext', t('optContext')], ['showQuota', t('optQuota')],
+      ['showToday', t('optToday')], ['showMonth', t('optMonth')],
     ];
     const box = document.getElementById('toggles');
     box.innerHTML = items.map(([k, label]) => {
@@ -186,6 +187,32 @@
     document.getElementById('refresh-btn').textContent = t('refresh');
     document.getElementById('quota-legend').textContent = t('paceLegend');
     renderThemeSeg();
+  }
+
+  function renderHeatmap(days) {
+    const dayMap = Object.create(null);
+    (days || []).forEach((d) => {
+      if (d && d.date) dayMap[d.date] = safeInt(d.total);
+    });
+    const now = new Date();
+    const cols = [];
+    let visibleMax = 1;
+    for (let w = 15; w >= 0; w--) {
+      const col = [];
+      for (let r = 6; r >= 0; r--) {
+        const dt = new Date(now);
+        dt.setDate(dt.getDate() - (w * 7 + r));
+        const key = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        const val = dayMap[key] || 0;
+        if (val > visibleMax) visibleMax = val;
+        col.push({ key, val });
+      }
+      cols.push(col);
+    }
+    return cols.map((col) => `<div class="heat-col">${col.map((cell) => {
+      const lvl = cell.val <= 0 ? '' : cell.val > visibleMax * 0.7 ? 'l4' : cell.val > visibleMax * 0.4 ? 'l3' : cell.val > visibleMax * 0.15 ? 'l2' : 'l1';
+      return `<div class="h-cell ${lvl}" title="${esc(`${cell.key}: ${fmtTokens(cell.val)} tokens`)}"></div>`;
+    }).join('')}</div>`).join('');
   }
 
   function renderSubBar(tag, frac, resetIso, pacing) {
@@ -255,7 +282,20 @@
         : `<div style="color:var(--faint);font-size:11.5px;">${esc(t('noData'))}</div>`;
 
       const usage = data.usage || {};
-      document.getElementById('today-sum').textContent = `${t('today')} ${fmtTokens(usage.todayTokens)}`;
+      document.getElementById('u-today').textContent = fmtTokens(usage.todayTokens);
+      document.getElementById('u-week').textContent = fmtTokens(usage.weekTokens);
+      document.getElementById('u-month').textContent = fmtTokens(usage.monthTokens);
+      document.getElementById('u-total').textContent = fmtTokens(usage.totalTokens);
+      const uMetaEl = document.getElementById('u-meta');
+      if (uMetaEl) {
+        const metaParts = [];
+        if (safeInt(usage.monthRequests) > 0) metaParts.push(`${safeInt(usage.monthRequests).toLocaleString()} ${t('requests')}`);
+        if (safeInt(usage.activeDays) > 0) metaParts.push(`${safeInt(usage.activeDays)} ${t('activeDays')}`);
+        uMetaEl.textContent = metaParts.join(' · ');
+      }
+      const heatEl = document.getElementById('heatmap');
+      if (heatEl) heatEl.innerHTML = renderHeatmap(usage.days);
+      document.getElementById('today-sum').textContent = `${t('month')} ${fmtTokens(usage.monthTokens)}`;
       const ranks = usage.modelRank || [];
       const tbody = document.getElementById('rank-body');
       tbody.textContent = '';

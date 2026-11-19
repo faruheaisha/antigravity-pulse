@@ -13,12 +13,13 @@ export const DEFAULT_PREFS = Object.freeze({
   showContext: true,
   showQuota: true,
   showToday: false,
+  showMonth: true,
   version: 0,
 });
 
 const ALLOWED_LANGS = new Set(['zh-CN', 'en']);
 const ALLOWED_THEMES = new Set(['swiss', 'glass', 'mono']);
-const BOOL_KEYS = ['showSpeed', 'showCache', 'showContext', 'showQuota', 'showToday'];
+const BOOL_KEYS = ['showSpeed', 'showCache', 'showContext', 'showQuota', 'showToday', 'showMonth'];
 
 export function sanitizePrefsPatch(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
