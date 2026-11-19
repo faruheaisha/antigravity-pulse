@@ -1,0 +1,21 @@
+{
+  "command": "node",
+  "args": ["main.mjs"],
+  "restart_policy": "always",
+  "display_name": "TokenMeter",
+  "description": "实时监控 Token 输出速率 (tok/s)、缓存命中率、上下文窗口占用与模型额度，支持底部状态条内嵌与侧边栏诊断面板。",
+  "has_web_ui": true,
+  "agent_permissions": {
+    "allows_user_interactions": false
+  },
+  "ui_config": {
+    "display_name": "TokenMeter",
+    "views": [
+      {
+        "path": "/",
+        "entrypoint": "SIDECAR_UI_ENTRYPOINT_AUX_PANE",
+        "title": "TokenMeter"
+      }
+    ]
+  }
+}
