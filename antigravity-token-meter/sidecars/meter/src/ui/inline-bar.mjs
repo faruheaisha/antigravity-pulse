@@ -175,7 +175,8 @@ export function buildInlineWidgetScript() {
           --tm-text: #0f172a;
           --tm-muted: #64748b;
           --tm-chip: rgba(15,23,42,0.045);
-          --tm-chip-hover: rgba(15,23,42,0.09);
+          --tm-chip-hover: rgba(15,23,42,0.065);
+          --tm-sep: rgba(15,23,42,0.22);
           --tm-accent: #0284c7;
           --tm-accent-soft: rgba(2,132,199,0.14);
           --tm-ok: #10b981;
@@ -193,20 +194,23 @@ export function buildInlineWidgetScript() {
           --tm-text: #e2e8f0;
           --tm-muted: #94a3b8;
           --tm-chip: rgba(248,250,252,0.07);
-          --tm-chip-hover: rgba(248,250,252,0.13);
+          --tm-chip-hover: rgba(248,250,252,0.08);
+          --tm-sep: rgba(248,250,252,0.22);
           --tm-accent: #38bdf8;
           --tm-accent-soft: rgba(56,189,248,0.16);
           --tm-shadow: 0 14px 36px rgba(0,0,0,0.5);
         }
-        .tm-bar-wrap { position: relative; display: flex; align-items: center; gap: 6px; padding: 4px 10px 2px; user-select: none; }
-        .tm-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-        .tm-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: var(--tm-chip); border: 1px solid var(--tm-border); color: var(--tm-text); cursor: pointer; transition: background .15s, border-color .15s; line-height: 18px; font-variant-numeric: tabular-nums; }
-        .tm-chip:hover, .tm-chip:focus-visible { background: var(--tm-chip-hover); border-color: var(--tm-accent); outline: none; }
-        .tm-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tm-ok); display: inline-block; flex-shrink: 0; }
-        .tm-dot.live { background: var(--tm-accent); box-shadow: 0 0 0 3px var(--tm-accent-soft); }
-        .tm-dot.off { background: var(--tm-muted); }
-        .tm-label { color: var(--tm-muted); font-size: 11px; }
-        .tm-val { font-weight: 600; }
+        .tm-bar-wrap { position: relative; display: flex; align-items: center; padding: 3px 8px 2px; user-select: none; }
+        .tm-chips { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+        .tm-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 5px; border-radius: 5px; background: transparent; border: none; color: var(--tm-muted); cursor: pointer; transition: background .15s, color .15s; line-height: 17px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+        .tm-chip:hover, .tm-chip:focus-visible { background: var(--tm-chip-hover); color: var(--tm-text); outline: none; }
+        .tm-sep { color: var(--tm-sep); font-size: 11px; padding: 0 1px; pointer-events: none; }
+        .tm-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--tm-ok); opacity: 0.85; display: inline-block; flex-shrink: 0; }
+        .tm-dot.live { background: var(--tm-accent); opacity: 1; }
+        .tm-dot.off { background: var(--tm-muted); opacity: 0.45; }
+        .tm-label { color: var(--tm-muted); font-size: 11px; font-weight: 400; }
+        .tm-val { color: var(--tm-text); font-weight: 500; opacity: 0.88; }
+        .tm-chip:hover .tm-val { opacity: 1; }
         .tm-popover { position: fixed; z-index: 2147483600; width: min(312px, calc(100vw - 20px)); max-height: calc(100vh - 24px); overflow: auto; background: var(--tm-card); border: 1px solid var(--tm-border); border-radius: 12px; box-shadow: var(--tm-shadow); padding: 12px; box-sizing: border-box; display: none; }
         .tm-popover.open { display: block; }
         .tm-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
@@ -297,26 +301,26 @@ export function buildInlineWidgetScript() {
       var dotCls = !snap || !snap.connected ? 'off' : isRunning ? 'live' : '';
       var expanded = state.popoverOpen ? 'true' : 'false';
 
-      var chipsHtml = '';
+      var chipItems = [];
       if (prefs.showSpeed !== false) {
-        chipsHtml += '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-dot ' + dotCls + '"></span><span class="tm-val">' +
-          (tpsVal != null ? Number(tpsVal).toFixed(1) : '--') + '</span><span class="tm-label">' + escapeHtml(t('speedUnit')) + '</span></button>';
+        chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-dot ' + dotCls + '"></span><span class="tm-val">' +
+          (tpsVal != null ? Number(tpsVal).toFixed(1) : '--') + '</span><span class="tm-label">' + escapeHtml(t('speedUnit')) + '</span></button>');
       }
       if (prefs.showCache !== false) {
-        chipsHtml += '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('cacheHit')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(cacheVal)) + '</span></button>';
+        chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('cacheHit')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(cacheVal)) + '</span></button>');
       }
       if (prefs.showContext !== false) {
-        chipsHtml += '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('context')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(ctxFrac)) + '</span></button>';
+        chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('context')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(ctxFrac)) + '</span></button>');
       }
       if (prefs.showQuota !== false && leadQuota) {
-        chipsHtml += '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('quota')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(leadQuota.remainingFraction)) + '</span></button>';
+        chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('quota')) + '</span><span class="tm-val">' + escapeHtml(fmtPct(leadQuota.remainingFraction)) + '</span></button>');
       }
       if (prefs.showToday === true && usage) {
-        chipsHtml += '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val">' + escapeHtml(fmtTokens(usage.todayTokens)) + '</span></button>';
+        chipItems.push('<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-label">' + escapeHtml(t('today')) + '</span><span class="tm-val">' + escapeHtml(fmtTokens(usage.todayTokens)) + '</span></button>');
       }
-      if (!chipsHtml) {
-        chipsHtml = '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-dot ' + dotCls + '"></span><span class="tm-val">' + escapeHtml(t('brand')) + '</span></button>';
-      }
+      var chipsHtml = chipItems.length
+        ? chipItems.join('<span class="tm-sep" aria-hidden="true">·</span>')
+        : '<button class="tm-chip" type="button" aria-expanded="' + expanded + '" data-tm-trigger="1"><span class="tm-dot ' + dotCls + '"></span><span class="tm-val">' + escapeHtml(t('brand')) + '</span></button>';
 
       var chipsEl = shadow.getElementById('tm-chips');
       if (chipsEl) chipsEl.innerHTML = chipsHtml;
