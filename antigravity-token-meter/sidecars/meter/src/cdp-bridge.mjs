@@ -23,9 +23,12 @@ const WORLD_NAME = 'AntigravityTokenMeterWorld';
 
 /**
  * 校验 CDP 目标是否属于可信 Antigravity 本地主窗口。
+ * Antigravity 2.33+ 中，language_server 同时监听相邻的 HTTPS Hub 静态端口与 RPC 端口（例如 50066 与 50067），
+ * 因此除严格同端口匹配外，亦放行同一 Electron CDP 实例下相邻端口（差值 <= 16）的本地 HTTPS 页面，
+ * 同时继续严格拒绝第三方本地服务（如 3000/8080）、远程站点与 iframe。
  * @param {any} target
  * @param {number} cdpPort
- * @param {number | null} [expectedHubPort] 若已知宿主 language_server 端口则强制匹配
+ * @param {number | null} [expectedHubPort] 宿主 language_server 端口（用于同端口或相邻 HTTPS Hub 端口校验）
  */
 export function isTrustedHubTarget(target, cdpPort, expectedHubPort = null) {
   if (!target || typeof target !== 'object' || target.type !== 'page') return false;
@@ -38,7 +41,10 @@ export function isTrustedHubTarget(target, cdpPort, expectedHubPort = null) {
     if (wsPort !== cdpPort) return false;
     if (expectedHubPort !== null) {
       const pagePort = pageUrl.port ? Number(pageUrl.port) : pageUrl.protocol === 'https:' ? 443 : 80;
-      if (pagePort !== expectedHubPort) return false;
+      if (pagePort !== expectedHubPort) {
+        const isAdjacentHttpsHub = pageUrl.protocol === 'https:' && Math.abs(pagePort - expectedHubPort) <= 16;
+        if (!isAdjacentHttpsHub) return false;
+      }
     }
     return true;
   } catch {

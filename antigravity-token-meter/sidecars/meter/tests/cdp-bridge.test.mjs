@@ -34,8 +34,11 @@ class FakeCdpSession {
   close() { this.closed = true; }
 }
 
-test('isTrustedHubTarget 校验预期 Hub 端口，拒绝其他本地服务、远程页面与 iframe', () => {
+test('isTrustedHubTarget 校验预期 Hub 端口与 2.33+ 相邻 HTTPS 端口，拒绝第三方本地服务、远程页面与 iframe', () => {
   assert.equal(isTrustedHubTarget(mockTarget('a', 54321, 53150), 54321, 53150), true);
+  // Antigravity 2.33+ 中 language_server 的 HTTPS Hub 与 RPC 端口相邻（如 50066 vs 50067）
+  assert.equal(isTrustedHubTarget(mockTarget('a', 54321, 50066), 54321, 50067), true);
+  assert.equal(isTrustedHubTarget({ ...mockTarget('a', 54321, 50066), url: 'http://127.0.0.1:50066/c/11111111-1111-1111-1111-111111111111' }, 54321, 50067), false);
   assert.equal(isTrustedHubTarget(mockTarget('a', 54321, 8080), 54321, 53150), false);
   assert.equal(isTrustedHubTarget({ ...mockTarget(), url: 'https://github.com/a/b' }, 54321, null), false);
   assert.equal(isTrustedHubTarget({ ...mockTarget(), type: 'iframe' }, 54321, null), false);

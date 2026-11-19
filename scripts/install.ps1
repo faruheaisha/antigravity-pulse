@@ -5,10 +5,10 @@
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.0 安装器' } catch {}
+try { $Host.UI.RawUI.WindowTitle = 'Antigravity TokenMeter v1.1.1 安装器' } catch {}
 
 Write-Host '================================================================' -ForegroundColor Cyan
-Write-Host '  Antigravity TokenMeter v1.1.0 (MIT License)' -ForegroundColor Cyan
+Write-Host '  Antigravity TokenMeter v1.1.1 (MIT License)' -ForegroundColor Cyan
 Write-Host '  支持侧边栏面板 + 可选实验性底部内嵌状态条（不修改 app.asar）' -ForegroundColor Cyan
 Write-Host '================================================================' -ForegroundColor Cyan
 Write-Host ''
@@ -148,7 +148,7 @@ $pluginsMap['antigravity-token-meter'] = $pluginEntry
 if ($pluginsMap.Contains('antigravity-pulse')) {
     $disableOld = [bool]$DisableLegacyPulse
     if (-not $disableOld -and -not $NonInteractive) {
-        $ans = Read-Host '检测到旧版 antigravity-pulse 插件，是否同时停用它以避免底部状态条重复？(y/N，默认 N 保留)'
+        $ans = Read-Host '检测到旧版 antigravity-pulse 插件，是否同时停用它以避免底部状态条重复？[推荐输入 y 后回车] (y/N，直接回车默认保留)'
         if ($ans -match '^[Yy]$') { $disableOld = $true }
     }
     if ($disableOld) {
@@ -192,7 +192,7 @@ if (-not $EnableInline -and -not $NonInteractive) {
     Write-Host '    - 默认侧边栏面板：零额外启动参数，随时可用；' -ForegroundColor White
     Write-Host '    - 实验性底部状态条内嵌：需通过本目录的专用启动器以 --remote-debugging-port=0 启动。' -ForegroundColor White
     Write-Host '      （提示：本地回环调试端口无独立认证，仅建议在个人信任设备开启；本安装器不会修改您现有的系统快捷方式）' -ForegroundColor Gray
-    $inlineAns = Read-Host '是否显式开启实验性聊天框底部内嵌模式？(y/N，默认 N 仅启用侧边栏)'
+    $inlineAns = Read-Host '是否开启聊天框底部透明状态条内嵌模式？[需要底部条请输入 y 后回车] (y/N，直接回车仅启用侧边栏)'
     $inlineEnabled = ($inlineAns -match '^[Yy]$')
 }
 
@@ -266,7 +266,7 @@ Write-Host '      已在 config.json 中同时启用 plugin 与 sidecar！' -For
 
 Write-Host ''
 Write-Host '================================================================' -ForegroundColor Green
-Write-Host '  Antigravity TokenMeter v1.1.0 安装完成！' -ForegroundColor Green
+Write-Host '  Antigravity TokenMeter v1.1.1 安装完成！' -ForegroundColor Green
 Write-Host '================================================================' -ForegroundColor Green
 Write-Host ''
 if ($inlineEnabled) {
